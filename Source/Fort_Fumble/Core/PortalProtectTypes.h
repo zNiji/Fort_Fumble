@@ -1,10 +1,10 @@
-// Portal Protect — shared gameplay types (PART 1)
+// shared structs for terrain, spawners, game mode - keeps everyone on the same data
 #pragma once
 
 #include "CoreMinimal.h"
 #include "PortalProtectTypes.generated.h"
 
-/** One enemy walkway from a map edge to the central tower. Requirement: >= 3 pathways. */
+// one enemy route - waypoints from map edge to the tower
 USTRUCT(BlueprintType)
 struct FPortalPath
 {
@@ -17,7 +17,7 @@ struct FPortalPath
 	FVector SpawnLocation = FVector::ZeroVector;
 };
 
-/** Predetermined defender build site derived from terrain (never on a path). */
+// where a defender pad goes - terrain picks spots off the paths
 USTRUCT(BlueprintType)
 struct FDefenderSlotData
 {

@@ -1,3 +1,5 @@
+// initial scatter + respawn up to MaxActiveCoins
+
 #include "Economy/CoinSpawner.h"
 #include "Economy/CoinPickup.h"
 #include "Terrain/ProceduralTerrainActor.h"
@@ -50,6 +52,7 @@ void ACoinSpawner::Tick(float DeltaTime)
 	}
 }
 
+// random off-path spot from terrain helper
 void ACoinSpawner::SpawnOneCoin()
 {
 	if (!Terrain || !GetWorld() || !CoinClass)
@@ -57,7 +60,7 @@ void ACoinSpawner::SpawnOneCoin()
 		return;
 	}
 
-	// Hard cap: never exceed MaxActiveCoins (initial burst + respawn share this path).
+	// never go over MaxActiveCoins (initial burst and respawn share this)
 	if (CountActiveCoins() >= MaxActiveCoins)
 	{
 		return;

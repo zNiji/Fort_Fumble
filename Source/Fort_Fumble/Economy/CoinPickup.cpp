@@ -1,3 +1,5 @@
+// coin mesh setup, texture fix, bob/spin, collection
+
 #include "Economy/CoinPickup.h"
 #include "Game/PortalProtectGameMode.h"
 #include "Game/PortalProtectPawn.h"
@@ -10,7 +12,7 @@
 
 namespace CoinPickupVisual
 {
-	/** Apply MID to every mesh slot (Sketchfab meshes can expose >1). */
+	// sketchfab coins can have multiple material slots
 	static void ApplyMaterialToAllSlots(UStaticMeshComponent* Mesh, UMaterialInterface* Mat)
 	{
 		if (!Mesh || !Mat)
@@ -24,12 +26,8 @@ namespace CoinPickupVisual
 		}
 	}
 
-	/**
-	 * Pack Material is an Interchange MIC of FBXLegacyPhongSurfaceMaterial with only
-	 * Ambient/Specular vectors set — DiffuseColorMap was never connected, so the coin
-	 * renders blank. Create a MID and wire Coin2_BaseColor into the Phong texture params.
-	 * Falls back to forest MI_DefaultPBR (T_BaseColor) if the pack parent is unavailable.
-	 */
+	// interchange import left diffuse map disconnected - wire Coin2_BaseColor into phong params
+	// falls back to forest MI_DefaultPBR if pack parent missing
 	static bool TryApplyTexturedCoinMaterial(UStaticMeshComponent* Mesh, UObject* Outer)
 	{
 		UTexture2D* CoinTex = LoadObject<UTexture2D>(
@@ -41,7 +39,7 @@ namespace CoinPickupVisual
 			return false;
 		}
 
-		// Prefer pack MIC parent (FBXLegacyPhong) — known texture param: DiffuseColorMap.
+		// try pack MIC parent first - texture param is DiffuseColorMap on phong
 		UMaterialInterface* ParentMat = LoadObject<UMaterialInterface>(
 			nullptr, TEXT("/Game/stylized-coin/source/Material.Material"));
 		if (!ParentMat)
@@ -67,7 +65,7 @@ namespace CoinPickupVisual
 			return false;
 		}
 
-		// Interchange FBX Phong + common PBR names — set all; unused names are no-ops.
+		// set every likely texture param name, unused ones are no-ops
 		static const FName TexParams[] = {
 			TEXT("DiffuseColorMap"),
 			TEXT("T_BaseColor"),
@@ -82,7 +80,7 @@ namespace CoinPickupVisual
 			MID->SetTextureParameterValue(Param, CoinTex);
 		}
 
-		// Ensure map weight is fully on (Interchange Phong uses *MapWeight scalars).
+		// full weight on texture maps
 		static const FName WeightParams[] = {
 			TEXT("DiffuseColorMapWeight"),
 			TEXT("AmbientColorMapWeight"),
@@ -92,7 +90,7 @@ namespace CoinPickupVisual
 			MID->SetScalarParameterValue(Param, 1.f);
 		}
 
-		// White diffuse so the texture is not multiplied by a dark tint.
+		// white diffuse so texture isn't darkened
 		MID->SetVectorParameterValue(TEXT("DiffuseColor"), FLinearColor::White);
 		MID->SetVectorParameterValue(TEXT("AmbientColor"), FLinearColor(0.05f, 0.05f, 0.05f));
 
@@ -120,7 +118,7 @@ ACoinPickup::ACoinPickup()
 	CoinMesh->SetCastShadow(true);
 	CoinMesh->bCastDynamicShadow = true;
 
-	// Stylized coin StaticMesh (Content/stylized-coin/source/Coin).
+	// stylized coin mesh from content/stylized-coin
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CoinAsset(
 		TEXT("/Game/stylized-coin/source/Coin.Coin"));
 	if (CoinAsset.Succeeded())
@@ -128,7 +126,7 @@ ACoinPickup::ACoinPickup()
 		CoinMesh->SetStaticMesh(CoinAsset.Object);
 		const FBoxSphereBounds Bounds = CoinAsset.Object->GetBounds();
 		const float MeshDiameter = FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y) * 2.f;
-		// Pickup-sized on terrain (~55uu footprint; old flattened sphere was ~45uu).
+		// ~55uu pickup size on terrain
 		constexpr float TargetDiameter = 55.f;
 		const float Scale = FMath::Clamp(TargetDiameter / FMath::Max(MeshDiameter, 1.f), 0.05f, 8.f);
 		CoinMesh->SetRelativeScale3D(FVector(Scale));
@@ -167,7 +165,7 @@ void ACoinPickup::BeginPlay()
 	{
 		if (!CoinPickupVisual::TryApplyTexturedCoinMaterial(CoinMesh, this))
 		{
-			// Last resort: gold tint so the mesh is never blank white/black.
+			// gold tint fallback if texture wiring fails
 			if (UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
 					nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")))
 			{
@@ -205,6 +203,7 @@ void ACoinPickup::Tick(float DeltaTime)
 	AddActorWorldRotation(FRotator(0.f, SpinSpeed * DeltaTime, 0.f));
 }
 
+// only FPS pawn collects, credits game mode, destroys pickup
 void ACoinPickup::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {

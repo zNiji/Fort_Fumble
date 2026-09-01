@@ -1,3 +1,5 @@
+// timed spawn, round-robin path picks
+
 #include "Enemy/EnemySpawner.h"
 #include "Enemy/EnemyUnit.h"
 #include "Terrain/ProceduralTerrainActor.h"
@@ -45,6 +47,7 @@ void AEnemySpawner::Tick(float DeltaTime)
 	}
 }
 
+// spawn slime at next path start, pass full waypoint list
 void AEnemySpawner::SpawnEnemy()
 {
 	if (!EnemyClass || CachedPaths.Num() == 0)
@@ -52,7 +55,7 @@ void AEnemySpawner::SpawnEnemy()
 		return;
 	}
 
-	// Round-robin across the generated path start points.
+	// rotate through path start points so pressure spreads across lanes
 	const FPortalPath& Path = CachedPaths[NextPathIndex % CachedPaths.Num()];
 	NextPathIndex++;
 

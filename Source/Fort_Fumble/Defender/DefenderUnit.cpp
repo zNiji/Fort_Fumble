@@ -1,3 +1,5 @@
+// cannon unit - aiming, auto fire, damage feedback
+
 #include "Defender/DefenderUnit.h"
 #include "Enemy/EnemyUnit.h"
 #include "Components/SceneComponent.h"
@@ -10,7 +12,7 @@ ADefenderUnit::ADefenderUnit()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	// Scene root so Mesh RelativeRotation survives SetActorRotation in UpdateAim.
+	// scene root so mesh relative rotation survives SetActorRotation in UpdateAim
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
@@ -20,26 +22,23 @@ ADefenderUnit::ADefenderUnit()
 	Mesh->SetCollisionObjectType(ECC_WorldDynamic);
 	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
 	Mesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-	// Enemy projectiles are WorldDynamic + Overlap — Block vs Overlap never generates BeginOverlap.
+	// projectiles need overlap not block on cannon mesh
 	Mesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	Mesh->SetGenerateOverlapEvents(true);
 
-	// Cannon.uasset is a MaterialInstanceConstant named "Cannon" — NOT a StaticMesh.
-	// The imported FBX StaticMesh lives at CannonSketchfab.
+	// Cannon.uasset in content is a material, real mesh is CannonSketchfab
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CannonAsset(
 		TEXT("/Game/cartoon_cannon_low_poly__extracted/source/CannonSketchfab.CannonSketchfab"));
 	if (CannonAsset.Succeeded())
 	{
 		Mesh->SetStaticMesh(CannonAsset.Object);
-		// CannonSketchfab ApproxSize ~101x125x101 (already cm). Old scale 55 filled the map.
-		// Fit slightly larger than the yellow pad (~120uu diameter from 1.2× cylinder).
+		// fit mesh to ~140uu footprint on the ~120uu pad
 		const FBoxSphereBounds Bounds = CannonAsset.Object->GetBounds();
 		const float MeshFootprint = FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y) * 2.f;
 		constexpr float TargetFootprint = 140.f;
 		BaseMeshScale = FMath::Clamp(TargetFootprint / FMath::Max(MeshFootprint, 1.f), 0.3f, 2.f);
 		Mesh->SetRelativeScale3D(FVector(BaseMeshScale));
-		// RelYaw −90 was still wrong per playtest. Flip to +90 so barrel/protrusion = actor +X.
-		// AimYawOffset stays 0: UpdateAim rotates the actor toward the target; mesh offset holds.
+		// +90 rel yaw so barrel points along actor +X after playtest fiddling
 		Mesh->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 		PivotToGroundOffset = (Bounds.BoxExtent.Z - Bounds.Origin.Z) * BaseMeshScale;
 		bUsingCannonMesh = true;
@@ -80,7 +79,7 @@ void ADefenderUnit::Tick(float DeltaTime)
 		return;
 	}
 
-	// Visual tracking every frame — independent of attack cooldown / damage timing.
+	// barrel tracks target every frame, separate from attack cooldown
 	UpdateAim(DeltaTime);
 
 	AttackTimer -= DeltaTime;
@@ -106,22 +105,23 @@ void ADefenderUnit::ApplyDamage(float Amount)
 	}
 }
 
+// smooth rotate toward nearest slime in range
 void ADefenderUnit::UpdateAim(float DeltaTime)
 {
 	AEnemyUnit* Target = FindNearestEnemy();
 	if (!Target)
 	{
-		return; // Hold last facing when idle.
+		return; // keep last facing when nothing in range
 	}
 
 	FVector ToTarget = Target->GetActorLocation() - GetActorLocation();
-	ToTarget.Z += 40.f; // Aim toward torso / center mass, not feet.
+	ToTarget.Z += 40.f; // aim at body not feet
 	if (ToTarget.SizeSquared() < 1.f)
 	{
 		return;
 	}
 
-	// Actor forward (+X) faces the enemy; Mesh RelYaw keeps the barrel on that axis.
+	// actor +X is forward, mesh rel yaw lines barrel up with that
 	FRotator Desired = ToTarget.Rotation();
 	Desired.Yaw += AimYawOffset;
 	Desired.Pitch = FMath::Clamp(Desired.Pitch, -AimMaxPitch, AimMaxPitch);
@@ -131,6 +131,7 @@ void ADefenderUnit::UpdateAim(float DeltaTime)
 	SetActorRotation(NewRot);
 }
 
+// damage nearest enemy in 2D attack range
 void ADefenderUnit::TryAttack()
 {
 	if (AEnemyUnit* Target = FindNearestEnemy())
@@ -157,7 +158,7 @@ AEnemyUnit* ADefenderUnit::FindNearestEnemy() const
 		{
 			continue;
 		}
-		// 2D range so elevated pads still reach path enemies (matches EnemyUnit).
+		// 2D range so elevated pads still hit path enemies
 		const float DistSq = FVector::DistSquared2D(Origin, Enemy->GetActorLocation());
 		if (DistSq <= BestDistSq)
 		{
@@ -170,7 +171,7 @@ AEnemyUnit* ADefenderUnit::FindNearestEnemy() const
 
 void ADefenderUnit::RefreshColor()
 {
-	// Keep pack materials intact; show damage via a mild scale dip instead of recoloring.
+	// keep pack materials, show damage with slight scale dip
 	const float Ratio = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
 	const float ScaleMul = FMath::Lerp(0.92f, 1.f, Ratio);
 	if (bUsingCannonMesh)

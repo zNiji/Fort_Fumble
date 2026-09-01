@@ -1,3 +1,5 @@
+// homing projectile flight and damage routing
+
 #include "Enemy/EnemyProjectile.h"
 #include "Tower/CentralTower.h"
 #include "Defender/DefenderUnit.h"
@@ -16,7 +18,7 @@ AEnemyProjectile::AEnemyProjectile()
 	Collision->InitSphereRadius(18.f);
 	Collision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	Collision->SetCollisionObjectType(ECC_WorldDynamic);
-	// Ignore terrain/pawns so sweeps don't stick on ground or sibling slimes; overlap dynamics for cannons/tower.
+	// ignore terrain/pawns, overlap dynamics for cannons and tower
 	Collision->SetCollisionResponseToAllChannels(ECR_Ignore);
 	Collision->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	Collision->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Overlap);
@@ -50,13 +52,14 @@ void AEnemyProjectile::BeginPlay()
 
 	Collision->OnComponentBeginOverlap.AddDynamic(this, &AEnemyProjectile::OnOverlap);
 
-	// Slime-green tint so shots read as enemy fire.
+	// green tint so shots read as enemy fire
 	if (UMaterialInstanceDynamic* Mid = Mesh->CreateAndSetMaterialInstanceDynamic(0))
 	{
 		Mid->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.25f, 0.85f, 0.35f));
 	}
 }
 
+// aim at target torso, velocity moves it (no terrain sweep)
 void AEnemyProjectile::InitProjectile(AActor* InTarget, float InDamage, float InSpeed, AActor* InInstigatorActor)
 {
 	TargetActor = InTarget;
@@ -93,7 +96,7 @@ void AEnemyProjectile::Tick(float DeltaTime)
 		return;
 	}
 
-	// Soft homing keeps shots on cannons / tower while enemies are moving.
+	// soft homing toward cannons/tower while they move
 	const FVector AimOffset(0.f, 0.f, 40.f);
 	if (AActor* Target = TargetActor.Get())
 	{
@@ -105,7 +108,7 @@ void AEnemyProjectile::Tick(float DeltaTime)
 			SetActorRotation(Velocity.Rotation());
 		}
 
-		// Reliable TD hit: large radius covers cannon footprint + height delta vs path.
+		// big hit radius for TD feel - covers cannon size and height delta
 		const float HitR = HitProximityRadius;
 		if (FVector::DistSquared(GetActorLocation(), AimPoint) <= HitR * HitR
 			|| FVector::DistSquared2D(GetActorLocation(), Target->GetActorLocation()) <= HitR * HitR)
@@ -115,7 +118,7 @@ void AEnemyProjectile::Tick(float DeltaTime)
 		}
 	}
 
-	// No sweep — WorldStatic Block would pin shots into hills before they reach elevated pads.
+	// no sweep - WorldStatic block would stick shots in hills before elevated pads
 	SetActorLocation(GetActorLocation() + Velocity * DeltaTime, false);
 }
 
@@ -125,6 +128,7 @@ void AEnemyProjectile::OnOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 	ApplyHitTo(OtherActor);
 }
 
+// only hurt tower or cannons - ignore slimes, props, instigator
 void AEnemyProjectile::ApplyHitTo(AActor* Other)
 {
 	if (bConsumed || !Other || Other == this)
@@ -135,7 +139,7 @@ void AEnemyProjectile::ApplyHitTo(AActor* Other)
 	{
 		return;
 	}
-	// Don't clip other slimes / sibling shots.
+	// don't hit other slimes or sibling shots
 	if (Cast<AEnemyUnit>(Other) || Cast<AEnemyProjectile>(Other))
 	{
 		return;
@@ -161,7 +165,7 @@ void AEnemyProjectile::ApplyHitTo(AActor* Other)
 		return;
 	}
 
-	// Ignore terrain / props — lifetime + target proximity handle cleanup (TD shots fly above ground).
+	// ignore terrain/props - lifetime and proximity handle cleanup
 }
 
 void AEnemyProjectile::DestroyProjectile()

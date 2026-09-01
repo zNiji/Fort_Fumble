@@ -1,4 +1,5 @@
-// PART 1 — Procedural 3D terrain mesh generated at runtime with randomized seed.
+// runtime terrain actor - builds the whole map when the level starts
+// see other functions below for paths, pads, and decoration
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,11 +12,6 @@ class UStaticMesh;
 class UMaterialInterface;
 class UStaticMeshComponent;
 
-/**
- * Generates a heightfield mesh at BeginPlay using a random seed so every launch differs.
- * Carves at least three pathways that all converge on the map center (tower site).
- * Also derives fixed defender placement slots that are never on a path.
- */
 UCLASS()
 class FORT_FUMBLE_API AProceduralTerrainActor : public AActor
 {
@@ -26,7 +22,7 @@ public:
 
 	virtual void BeginPlay() override;
 
-	/** Rebuild mesh / paths using Seed (or a fresh random seed if bUseRandomSeed). */
+	// rebuild everything - uses Seed unless bUseRandomSeed rolls a new one
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	void GenerateTerrain();
 
@@ -42,11 +38,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Terrain")
 	int32 GetSeed() const { return Seed; }
 
-	/** Random walkable world location off enemy paths (for coins / player spawn). */
+	// random spot you can walk on but not on a path - good for coins or player spawn
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	bool TryGetRandomOffPathLocation(FVector& OutLocation, float ZOffset = 40.f) const;
 
-	/** World position for a grid cell using stored heights. */
+	// world pos for a grid cell from the height array
 	UFUNCTION(BlueprintPure, Category = "Terrain")
 	FVector GetCellWorldLocation(int32 X, int32 Y, float ZOffset = 0.f) const;
 
@@ -56,11 +52,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Terrain")
 	int32 Seed = 1;
 
-	/** Odd grid resolution (forced odd at generate). Larger = bigger map. */
+	// grid size - forced odd so there's a real center cell, bigger = larger map
 	UPROPERTY(EditAnywhere, Category = "Terrain")
 	int32 Resolution = 73;
 
-	/** World units between grid cells. Playable span ≈ (Resolution-1)*CellSize. */
+	// distance between cells in uu - map span is roughly (Resolution-1) * CellSize
 	UPROPERTY(EditAnywhere, Category = "Terrain")
 	float CellSize = 110.f;
 
@@ -73,11 +69,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Terrain")
 	int32 PathHalfWidth = 1;
 
-	/** Visible blocking wall height (uu). */
+	// how tall the rim walls are
 	UPROPERTY(EditAnywhere, Category = "Terrain|Border", meta = (ClampMin = "50"))
 	float BorderWallHeight = 280.f;
 
-	/** Wall thickness (uu). Placed just outside the mesh rim. */
+	// wall thickness - sits just outside the terrain edge
 	UPROPERTY(EditAnywhere, Category = "Terrain|Border", meta = (ClampMin = "20"))
 	float BorderWallThickness = 80.f;
 
@@ -90,26 +86,26 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Terrain|Dressing")
 	float DressingMinDistFromPad = 180.f;
 
-	/** Extra cells around PathMask to keep trees/rocks clear of pathways. */
+	// buffer around paths so props don't hang over the road
 	UPROPERTY(EditAnywhere, Category = "Terrain|Dressing", meta = (ClampMin = "0", ClampMax = "4"))
 	int32 DressingPathClearance = 2;
 
-	/** Chebyshev cell radius around map center kept clear (portal plaza). */
+	// empty cells around map center for the portal plaza
 	UPROPERTY(EditAnywhere, Category = "Terrain|Dressing", meta = (ClampMin = "3", ClampMax = "24"))
 	int32 DressingTowerClearanceCells = 9;
 
-	/** World-unit radius around tower/portal so large meshes cannot spawn under the arch. */
+	// world radius around tower - stops big trees spawning inside the portal
 	UPROPERTY(EditAnywhere, Category = "Terrain|Dressing", meta = (ClampMin = "200"))
 	float DressingTowerClearanceRadius = 1100.f;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UProceduralMeshComponent> TerrainMesh;
 
-	/** Optional override. Leave null for stable green opaque MID (do not use pack foliage MI_Grass*). */
+	// optional grass mat - leave null for simple green tint (pack foliage mats break on PMC)
 	UPROPERTY(EditDefaultsOnly, Category = "Terrain|Visual")
 	TObjectPtr<UMaterialInterface> GrassMaterial;
 
-	/** Optional override. Leave null for stable dirt opaque MID (avoid atlas/WPO pack mats on PMC). */
+	// optional path/dirt mat - same deal, null = tinted basic shape
 	UPROPERTY(EditDefaultsOnly, Category = "Terrain|Visual")
 	TObjectPtr<UMaterialInterface> PathMaterial;
 
@@ -129,9 +125,9 @@ private:
 	void ClearMapBorder();
 	void SpawnMapBorder();
 	bool IsNearDefenderSlot(const FVector& WorldLoc) const;
-	/** True if (X,Y) is a path cell or within Radius Chebyshev cells of one. */
+	// path cell or within Radius cells of one (chebyshev)
 	bool IsOnOrNearPath(int32 X, int32 Y, int32 Radius) const;
-	/** Nearest path progress along waypoints: 0 = spawn, 1 = tower. Returns false if none nearby. */
+	// how far along a path this cell is - 0 spawn, 1 tower, false if nothing close
 	bool TryGetNearestPathProgress(int32 X, int32 Y, int32& OutPathIndex, float& OutProgress, float& OutDist2D) const;
 	FVector GridToWorld(int32 X, int32 Y, float Height) const;
 	bool IsInside(int32 X, int32 Y) const;
@@ -148,7 +144,7 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> DressingComponents;
 
-	/** Four edge walls (cubes) that block the player from leaving the map. */
+	// rim walls so the player can't walk off the map
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> BorderWallComponents;
 };

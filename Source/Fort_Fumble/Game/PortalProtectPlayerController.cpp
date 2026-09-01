@@ -1,3 +1,5 @@
+// FPS placement trace, pause menu, level restart
+
 #include "Game/PortalProtectPlayerController.h"
 #include "Game/PortalProtectGameMode.h"
 #include "Defender/DefenderPlacementSpot.h"
@@ -13,19 +15,38 @@ APortalProtectPlayerController::APortalProtectPlayerController()
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
 
-	// Default asset: Content/UI/Widgets/WBP_PauseMenu.uasset
+	PauseMenuClassSoft = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/UI/Widgets/WBP_PauseMenu.WBP_PauseMenu_C")));
+	GameOverMenuClassSoft = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/UI/Widgets/WBP_GameOverMenu.WBP_GameOverMenu_C")));
+
+	// default: Content/UI/Widgets/WBP_PauseMenu
 	static ConstructorHelpers::FClassFinder<UUserWidget> PauseMenuBP(
 		TEXT("/Game/UI/Widgets/WBP_PauseMenu"));
 	if (PauseMenuBP.Succeeded())
 	{
-		PauseMenuClassHard = PauseMenuBP.Class;
-		PauseMenuClass = PauseMenuBP.Class;
+		PauseMenuWidgetClass = PauseMenuBP.Class;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FClassFinder failed for pause menu at /Game/UI/Widgets/WBP_PauseMenu."));
+	}
+
+	// default: Content/UI/Widgets/WBP_GameOverMenu
+	static ConstructorHelpers::FClassFinder<UUserWidget> GameOverMenuBP(
+		TEXT("/Game/UI/Widgets/WBP_GameOverMenu"));
+	if (GameOverMenuBP.Succeeded())
+	{
+		GameOverMenuWidgetClass = GameOverMenuBP.Class;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FClassFinder failed for game-over menu at /Game/UI/Widgets/WBP_GameOverMenu."));
 	}
 }
 
 void APortalProtectPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	UE_LOG(LogTemp, Log, TEXT("PortalProtectPlayerController active"));
 	FInputModeGameOnly Mode;
 	SetInputMode(Mode);
 	bShowMouseCursor = false;
@@ -37,14 +58,19 @@ void APortalProtectPlayerController::SetupInputComponent()
 	if (InputComponent)
 	{
 		InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &APortalProtectPlayerController::OnLeftClick);
-		InputComponent->BindKey(EKeys::R, IE_Pressed, this, &APortalProtectPlayerController::OnRestart);
 
-		// Esc must fire while paused so the player can unpause.
-		FInputKeyBinding EscapeBinding(FInputChord(EKeys::Escape), IE_Pressed);
+		FInputKeyBinding& RestartBinding = InputComponent->BindKey(
+			EKeys::R, IE_Pressed, this, &APortalProtectPlayerController::OnRestart);
+		RestartBinding.bExecuteWhenPaused = true;
+
+		// esc/p still work while paused so you can unpause
+		FInputKeyBinding& EscapeBinding = InputComponent->BindKey(
+			EKeys::Escape, IE_Pressed, this, &APortalProtectPlayerController::TogglePauseMenu);
 		EscapeBinding.bExecuteWhenPaused = true;
-		EscapeBinding.KeyDelegate.GetDelegateForManualSet().BindUObject(
-			this, &APortalProtectPlayerController::TogglePauseMenu);
-		InputComponent->KeyBindings.Add(EscapeBinding);
+
+		FInputKeyBinding& PauseBinding = InputComponent->BindKey(
+			EKeys::P, IE_Pressed, this, &APortalProtectPlayerController::TogglePauseMenu);
+		PauseBinding.bExecuteWhenPaused = true;
 	}
 }
 
@@ -52,7 +78,7 @@ void APortalProtectPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
-	if (bPauseMenuOpen || IsPaused())
+	if (bPauseMenuOpen || bGameOverMenuOpen || IsPaused())
 	{
 		return;
 	}
@@ -69,6 +95,7 @@ void APortalProtectPlayerController::PlayerTick(float DeltaTime)
 	}
 }
 
+// camera line trace - only hits pads (visibility channel on cylinder)
 ADefenderPlacementSpot* APortalProtectPlayerController::TracePlacementSpot() const
 {
 	FVector ViewLoc;
@@ -87,7 +114,7 @@ ADefenderPlacementSpot* APortalProtectPlayerController::TracePlacementSpot() con
 
 void APortalProtectPlayerController::OnLeftClick()
 {
-	if (bPauseMenuOpen || IsPaused())
+	if (bPauseMenuOpen || bGameOverMenuOpen || IsPaused())
 	{
 		return;
 	}
@@ -106,24 +133,71 @@ void APortalProtectPlayerController::OnLeftClick()
 
 void APortalProtectPlayerController::OnRestart()
 {
-	if (bPauseMenuOpen || IsPaused())
+	if (bPauseMenuOpen)
 	{
 		return;
 	}
-	UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()));
+	RestartGame();
 }
 
 UClass* APortalProtectPlayerController::ResolvePauseMenuClass()
 {
-	if (UClass* Loaded = PauseMenuClass.LoadSynchronous())
+	if (PauseMenuWidgetClass)
 	{
+		return PauseMenuWidgetClass.Get();
+	}
+	if (UClass* Loaded = PauseMenuClassSoft.LoadSynchronous())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PauseMenu loaded via default soft class path: %s"), *PauseMenuClassSoft.ToString());
 		return Loaded;
 	}
-	return PauseMenuClassHard.Get();
+	return TryLoadWidgetClass(TEXT("/Game/UI/Widgets/WBP_PauseMenu.WBP_PauseMenu_C"), TEXT("PauseMenu"));
+}
+
+UClass* APortalProtectPlayerController::ResolveGameOverMenuClass()
+{
+	if (GameOverMenuWidgetClass)
+	{
+		return GameOverMenuWidgetClass.Get();
+	}
+	if (UClass* Loaded = GameOverMenuClassSoft.LoadSynchronous())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GameOverMenu loaded via default soft class path: %s"), *GameOverMenuClassSoft.ToString());
+		return Loaded;
+	}
+	return TryLoadWidgetClass(TEXT("/Game/UI/Widgets/WBP_GameOverMenu.WBP_GameOverMenu_C"), TEXT("GameOverMenu"));
+}
+
+UClass* APortalProtectPlayerController::TryLoadWidgetClass(const TCHAR* ClassObjectPath, const TCHAR* DebugName) const
+{
+	if (UClass* LoadedViaClass = LoadClass<UUserWidget>(nullptr, ClassObjectPath))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s loaded via LoadClass: %s"), DebugName, ClassObjectPath);
+		return LoadedViaClass;
+	}
+
+	if (UClass* LoadedViaStatic = Cast<UClass>(StaticLoadObject(UClass::StaticClass(), nullptr, ClassObjectPath)))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s loaded via StaticLoadObject: %s"), DebugName, ClassObjectPath);
+		return LoadedViaStatic;
+	}
+
+	UE_LOG(
+		LogTemp,
+		Error,
+		TEXT("%s widget class failed to load. Tried class path: %s. Assign the class on PortalProtectPlayerController defaults."),
+		DebugName,
+		ClassObjectPath);
+	return nullptr;
 }
 
 void APortalProtectPlayerController::TogglePauseMenu()
 {
+	if (bGameOverMenuOpen)
+	{
+		return;
+	}
+
 	if (bPauseMenuOpen)
 	{
 		ResumeGame();
@@ -147,9 +221,18 @@ void APortalProtectPlayerController::UnpauseGame()
 void APortalProtectPlayerController::QuitToMainMenu()
 {
 	HidePauseMenu();
+	HideGameOverMenu();
 	UGameplayStatics::OpenLevel(this, FName(TEXT("/Game/Scenes/MainMenu")));
 }
 
+void APortalProtectPlayerController::RestartGame()
+{
+	HidePauseMenu();
+	HideGameOverMenu();
+	UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()));
+}
+
+// pause, show cursor, load pause widget, wire resume/quit if buttons exist
 void APortalProtectPlayerController::ShowPauseMenu()
 {
 	if (bPauseMenuOpen)
@@ -173,7 +256,7 @@ void APortalProtectPlayerController::ShowPauseMenu()
 			return;
 		}
 
-		// Wire standard button names if present (BP graphs can also call ResumeGame / QuitToMainMenu).
+		// hook common button names - BP can also call ResumeGame / QuitToMainMenu directly
 		if (UButton* ResumeBtn = Cast<UButton>(PauseMenuWidget->GetWidgetFromName(TEXT("ButtonResume"))))
 		{
 			ResumeBtn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::ResumeGame);
@@ -217,4 +300,79 @@ void APortalProtectPlayerController::HidePauseMenu()
 
 	SetPause(false);
 	bPauseMenuOpen = false;
+}
+
+// same deal for game over screen
+void APortalProtectPlayerController::ShowGameOverMenu()
+{
+	if (bGameOverMenuOpen)
+	{
+		return;
+	}
+
+	if (bPauseMenuOpen)
+	{
+		HidePauseMenu();
+	}
+
+	UClass* WidgetClass = ResolveGameOverMenuClass();
+	if (!WidgetClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Game over menu widget class missing (expected /Game/UI/Widgets/WBP_GameOverMenu)."));
+		return;
+	}
+
+	if (!GameOverMenuWidget)
+	{
+		GameOverMenuWidget = CreateWidget<UUserWidget>(this, WidgetClass);
+		if (!GameOverMenuWidget)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Failed to create WBP_GameOverMenu."));
+			return;
+		}
+
+		// hook restart/quit if the widget has those button names
+		if (UButton* RestartBtn = Cast<UButton>(GameOverMenuWidget->GetWidgetFromName(TEXT("ButtonRestart"))))
+		{
+			RestartBtn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::RestartGame);
+		}
+		if (UButton* QuitBtn = Cast<UButton>(GameOverMenuWidget->GetWidgetFromName(TEXT("ButtonQuit"))))
+		{
+			QuitBtn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::QuitToMainMenu);
+		}
+	}
+
+	GameOverMenuWidget->AddToViewport(110);
+	GameOverMenuWidget->SetVisibility(ESlateVisibility::Visible);
+
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+
+	FInputModeGameAndUI Mode;
+	Mode.SetWidgetToFocus(GameOverMenuWidget->TakeWidget());
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	Mode.SetHideCursorDuringCapture(false);
+	SetInputMode(Mode);
+
+	SetPause(true);
+	bGameOverMenuOpen = true;
+}
+
+void APortalProtectPlayerController::HideGameOverMenu()
+{
+	if (GameOverMenuWidget)
+	{
+		GameOverMenuWidget->RemoveFromParent();
+	}
+
+	bShowMouseCursor = false;
+	bEnableClickEvents = false;
+	bEnableMouseOverEvents = false;
+
+	FInputModeGameOnly Mode;
+	SetInputMode(Mode);
+
+	SetPause(false);
+	bGameOverMenuOpen = false;
 }

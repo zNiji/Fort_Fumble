@@ -1,3 +1,5 @@
+// pad mesh, highlight colors, surface height for spawning cannons
+
 #include "Defender/DefenderPlacementSpot.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -18,11 +20,12 @@ ADefenderPlacementSpot::ADefenderPlacementSpot()
 	if (CylinderAsset.Succeeded())
 	{
 		MarkerMesh->SetStaticMesh(CylinderAsset.Object);
-		// Thin disc: XY ~120uu diameter, height 15uu; origin at center.
+		// thin disc ~120uu wide, 15uu tall, origin at center
 		MarkerMesh->SetRelativeScale3D(FVector(PadXYScale, PadXYScale, PadZScale));
 	}
 }
 
+// top of the yellow disc - game mode adds cannon pivot offset after this
 FVector ADefenderPlacementSpot::GetPadSurfaceLocation() const
 {
 	return GetActorLocation() + FVector(0.f, 0.f, GetPadHalfHeight());

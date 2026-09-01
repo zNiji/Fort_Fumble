@@ -1,3 +1,5 @@
+// match bootstrap, economy, placement rules
+
 #include "Game/PortalProtectGameMode.h"
 #include "Game/PortalProtectPlayerController.h"
 #include "Game/PortalProtectPawn.h"
@@ -32,10 +34,11 @@ void APortalProtectGameMode::BeginPlay()
 	PlayerPlaceAttempts = 0;
 	SpawnWorld();
 
-	// Pawn may not exist yet during GameMode BeginPlay — retry until FPS character is possessed.
+	// pawn might not exist yet at game mode BeginPlay - retry until possessed
 	GetWorldTimerManager().SetTimer(PlayerPlaceTimer, this, &APortalProtectGameMode::PlacePlayerOnTerrain, 0.05f, true);
 }
 
+// spawn terrain, tower, spawners, pads - wire everything to generated terrain data
 void APortalProtectGameMode::SpawnWorld()
 {
 	UWorld* World = GetWorld();
@@ -53,7 +56,7 @@ void APortalProtectGameMode::SpawnWorld()
 		return;
 	}
 
-	// Ensure generation completed (BeginPlay normally does this during spawn).
+	// BeginPlay on terrain usually already ran this, but just in case
 	if (Terrain->GetPaths().Num() == 0)
 	{
 		Terrain->GenerateTerrain();
@@ -88,10 +91,11 @@ void APortalProtectGameMode::SpawnWorld()
 		}
 	}
 
-	// Placement budget must cover the pads (≥ 3 per pathway).
+	// make sure budget covers all the pads (at least 3 per path)
 	DefendersRemaining = FMath::Max(StartingDefenders, PlacementSpots.Num());
 }
 
+// drop FPS pawn on random off-path cell, face the tower - retries until pawn exists
 void APortalProtectGameMode::PlacePlayerOnTerrain()
 {
 	UWorld* World = GetWorld();
@@ -137,6 +141,7 @@ void APortalProtectGameMode::PlacePlayerOnTerrain()
 	PC->SetControlRotation(FRotator(-10.f, Facing.Yaw, 0.f));
 }
 
+// check coins + budget, spawn cannon on pad top, deduct cost
 bool APortalProtectGameMode::TryPlaceDefenderAtSpot(ADefenderPlacementSpot* Spot)
 {
 	if (bGameOver || !Spot || Spot->IsOccupied())
@@ -158,7 +163,7 @@ bool APortalProtectGameMode::TryPlaceDefenderAtSpot(ADefenderPlacementSpot* Spot
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	// Spawn on pad top; then raise by the cannon's pivot→ground so the base sits on the disc.
+	// spawn on pad surface then lift by pivot-to-ground so base sits on the disc
 	const FVector Surface = Spot->GetPadSurfaceLocation();
 	ADefenderUnit* Defender = GetWorld()->SpawnActor<ADefenderUnit>(
 		ADefenderUnit::StaticClass(), Surface, FRotator::ZeroRotator, Params);
@@ -202,6 +207,7 @@ int32 APortalProtectGameMode::GetTerrainSeed() const
 	return Terrain ? Terrain->GetSeed() : 0;
 }
 
+// lose condition - stop spawns, show game over UI
 void APortalProtectGameMode::NotifyTowerDestroyed()
 {
 	bGameOver = true;
@@ -209,5 +215,21 @@ void APortalProtectGameMode::NotifyTowerDestroyed()
 	{
 		Spawner->SetSpawningEnabled(false);
 	}
-	SetStatusMessage(TEXT("GAME OVER — the portal fell."), 30.f);
+
+	if (UWorld* World = GetWorld())
+	{
+		APlayerController* FirstPC = World->GetFirstPlayerController();
+		if (APortalProtectPlayerController* PC = Cast<APortalProtectPlayerController>(FirstPC))
+		{
+			PC->ShowGameOverMenu();
+		}
+		else
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("NotifyTowerDestroyed: expected PortalProtectPlayerController but got %s. Check GameMode/PlayerController project settings."),
+				FirstPC ? *FirstPC->GetClass()->GetName() : TEXT("null"));
+		}
+	}
 }

@@ -1,3 +1,5 @@
+// portal objective - HP and passive shooting at nearby slimes
+
 #include "Tower/CentralTower.h"
 #include "Enemy/EnemyUnit.h"
 #include "Components/StaticMeshComponent.h"
@@ -14,7 +16,7 @@ ACentralTower::ACentralTower()
 	BaseMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	BaseMesh->SetCollisionObjectType(ECC_WorldStatic);
 	BaseMesh->SetCollisionResponseToAllChannels(ECR_Block);
-	// Enemy projectiles are WorldDynamic Overlap — allow BeginOverlap damage on the portal.
+	// enemy projectiles are WorldDynamic overlap - need overlap on portal for damage
 	BaseMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	BaseMesh->SetGenerateOverlapEvents(true);
 
@@ -34,7 +36,7 @@ ACentralTower::ACentralTower()
 	}
 	else
 	{
-		// Fallback so the project still runs if the pack is missing.
+		// fallback cylinder if forest pack portal mesh is missing
 		static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderAsset(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 		if (CylinderAsset.Succeeded())
 		{
@@ -70,7 +72,7 @@ void ACentralTower::Tick(float DeltaTime)
 		return;
 	}
 
-	// Portal stays fixed — no yaw toward enemies; combat is damage-only.
+	// portal doesn't rotate - just shoots on cooldown
 	AttackTimer -= DeltaTime;
 	if (AttackTimer <= 0.f)
 	{
@@ -79,6 +81,7 @@ void ACentralTower::Tick(float DeltaTime)
 	}
 }
 
+// take damage, shrink visual a bit, broadcast destroy at zero
 void ACentralTower::ApplyDamage(float Amount)
 {
 	if (!IsAlive())
@@ -95,6 +98,7 @@ void ACentralTower::ApplyDamage(float Amount)
 	}
 }
 
+// instant damage to nearest slime in range (debug line shows the shot)
 void ACentralTower::TryAttack()
 {
 	if (AEnemyUnit* Target = FindNearestEnemy())
@@ -133,7 +137,7 @@ AEnemyUnit* ACentralTower::FindNearestEnemy() const
 
 void ACentralTower::ApplyVisualColor()
 {
-	// Pack portal materials don't expose a Color param — use emissive pulse via scale.
+	// pack portal mat has no color param - pulse scale instead for damage feedback
 	const float Ratio = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
 	const float Scale = FMath::Lerp(BaseVisualScale * 0.85f, BaseVisualScale, Ratio);
 	BaseMesh->SetRelativeScale3D(FVector(Scale));

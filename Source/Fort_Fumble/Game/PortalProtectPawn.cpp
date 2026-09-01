@@ -1,3 +1,5 @@
+// first-person movement and look - walk the map, collect coins, aim at pads
+
 #include "Game/PortalProtectPawn.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -29,15 +31,15 @@ APortalProtectPawn::APortalProtectPawn()
 	FirstPersonCamera->bUsePawnControlRotation = true;
 }
 
+// WASD, mouse look, jump
 void APortalProtectPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 	check(PlayerInputComponent);
 
-	PlayerInputComponent->BindAxisKey(EKeys::W, this, &APortalProtectPawn::MoveForward);
-	PlayerInputComponent->BindAxisKey(EKeys::S, this, &APortalProtectPawn::MoveBackward);
-	PlayerInputComponent->BindAxisKey(EKeys::D, this, &APortalProtectPawn::MoveRight);
-	PlayerInputComponent->BindAxisKey(EKeys::A, this, &APortalProtectPawn::MoveLeft);
+	// WASD are digital keys - use axis mappings from DefaultInput.ini
+	PlayerInputComponent->BindAxis(TEXT("MoveForward"), this, &APortalProtectPawn::MoveForward);
+	PlayerInputComponent->BindAxis(TEXT("MoveRight"), this, &APortalProtectPawn::MoveRight);
 	PlayerInputComponent->BindAxisKey(EKeys::MouseX, this, &APortalProtectPawn::LookYaw);
 	PlayerInputComponent->BindAxisKey(EKeys::MouseY, this, &APortalProtectPawn::LookPitch);
 
@@ -53,27 +55,11 @@ void APortalProtectPawn::MoveForward(float Value)
 	}
 }
 
-void APortalProtectPawn::MoveBackward(float Value)
-{
-	if (Controller && !FMath::IsNearlyZero(Value))
-	{
-		AddMovementInput(GetActorForwardVector(), -Value);
-	}
-}
-
 void APortalProtectPawn::MoveRight(float Value)
 {
 	if (Controller && !FMath::IsNearlyZero(Value))
 	{
 		AddMovementInput(GetActorRightVector(), Value);
-	}
-}
-
-void APortalProtectPawn::MoveLeft(float Value)
-{
-	if (Controller && !FMath::IsNearlyZero(Value))
-	{
-		AddMovementInput(GetActorRightVector(), -Value);
 	}
 }
 

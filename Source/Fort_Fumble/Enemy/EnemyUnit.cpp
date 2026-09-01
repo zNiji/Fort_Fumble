@@ -1,3 +1,5 @@
+// slime pathing, combat, idle/walk anims
+
 #include "Enemy/EnemyUnit.h"
 #include "Enemy/EnemyProjectile.h"
 #include "Tower/CentralTower.h"
@@ -29,11 +31,10 @@ AEnemyUnit::AEnemyUnit()
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetGenerateOverlapEvents(false);
 	Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-	// Slime pack: RelYaw +90 maps pack +Y → actor +X. MeshYawOffset=+180 flips face forward
-	// (playtest: RelYaw+90 alone left them walking backward).
+	// slime mesh facing - rel yaw +90 then MeshYawOffset 180 so they don't walk backward
 	Mesh->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 
-	// Primary first-enemy visual: PBR Slime (small-medium path unit). No AnimBP in pack — single-node idle/walk.
+	// main enemy visual - slime from monster pack, single-node idle/walk (no anim BP)
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MonsterAsset(
 		TEXT("/Game/MonsterForSurvivalGame/Mesh/PBR/Slime_SK.Slime_SK"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleAsset(
@@ -50,7 +51,7 @@ AEnemyUnit::AEnemyUnit()
 		MeshScale = BaseMeshScale;
 		Mesh->SetRelativeScale3D(FVector(BaseMeshScale));
 
-		// Pivot is typically near feet; lift so the body sits on the path surface.
+		// lift mesh so feet sit on path surface
 		const float BottomZ = Bounds.Origin.Z - Bounds.BoxExtent.Z;
 		Mesh->SetRelativeLocation(FVector(0.f, 0.f, -BottomZ * BaseMeshScale));
 
@@ -88,6 +89,7 @@ void AEnemyUnit::BeginPlay()
 		TEXT("[PortalProtect] Enemy slime facing: Mesh RelYaw=+90, MeshYawOffset=180 (actor faces move/aim dir)."));
 }
 
+// spawner passes waypoint list, snap to first path cell
 void AEnemyUnit::InitializeOnPath(const TArray<FVector>& InWaypoints)
 {
 	Waypoints = InWaypoints;
@@ -95,7 +97,7 @@ void AEnemyUnit::InitializeOnPath(const TArray<FVector>& InWaypoints)
 	bInitialized = Waypoints.Num() > 0;
 	if (bInitialized)
 	{
-		// Keep collision center above the path so the sphere sits on the surface.
+		// keep collision center on path surface
 		const float GroundZ = Waypoints[0].Z;
 		const float Radius = Collision->GetScaledSphereRadius();
 		SetActorLocation(FVector(Waypoints[0].X, Waypoints[0].Y, GroundZ + Radius));
@@ -129,10 +131,10 @@ void AEnemyUnit::ApplyDamage(float Amount)
 	}
 }
 
+// step toward current waypoint, pause when bCombatEngaged
 void AEnemyUnit::MoveAlongPath(float DeltaTime)
 {
-	// Hold only when TryAttackEnemyTargets set engage (inside AttackRange * EngageStopFactor).
-	// Do not pause at a larger aggro ring — that left units stuck out of mutual fire range.
+	// only stop when inside engage range, not just aggro range
 	if (bCombatEngaged)
 	{
 		return;
@@ -140,7 +142,7 @@ void AEnemyUnit::MoveAlongPath(float DeltaTime)
 
 	if (WaypointIndex >= Waypoints.Num())
 	{
-		// Path complete — face the tower and wait (attacks handled in TryAttackEnemyTargets).
+		// reached end of path - face tower and shoot from TryAttackEnemyTargets
 		if (ACentralTower* Tower = FindTower())
 		{
 			UpdateFacing(Tower->GetActorLocation() - GetActorLocation(), DeltaTime);
@@ -175,6 +177,7 @@ void AEnemyUnit::MoveAlongPath(float DeltaTime)
 	}
 }
 
+// pick defender or tower in range, spawn projectile on cooldown
 bool AEnemyUnit::TryAttackEnemyTargets(float DeltaTime)
 {
 	bCombatEngaged = false;
@@ -183,8 +186,7 @@ bool AEnemyUnit::TryAttackEnemyTargets(float DeltaTime)
 	const bool bAtPathEnd = WaypointIndex >= Waypoints.Num();
 	const FVector Origin = GetActorLocation();
 
-	// Prefer nearest defender in fire range; otherwise the tower if in range (wider at path end).
-	// Aggro ≈ AttackRange for selection; pathing only freezes inside EngageStopFactor of that range.
+	// defenders first if in fire range, else tower (wider range at path end)
 	const float SelectRange = FMath::Max(AttackRange, DefenderAggroRange);
 	ADefenderUnit* Defender = FindNearbyDefender(SelectRange);
 	ACentralTower* Tower = FindTower();
@@ -272,6 +274,7 @@ void AEnemyUnit::FireProjectileAt(AActor* Target)
 		FColor::Orange, false, 0.1f, 0, 2.f);
 }
 
+// yaw toward move/combat dir, MeshYawOffset fixes import facing
 void AEnemyUnit::UpdateFacing(const FVector& WorldDirection, float DeltaTime)
 {
 	FVector Flat = WorldDirection;
@@ -332,7 +335,7 @@ ACentralTower* AEnemyUnit::FindTower() const
 
 void AEnemyUnit::RefreshDamageVisual()
 {
-	// Preserve pack materials; telegraph damage with a slight squash.
+	// damage feedback = slight squash, keep pack materials
 	const float Ratio = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
 	const float ScaleMul = FMath::Lerp(0.88f, 1.f, Ratio);
 	if (bUsingMonsterMesh)

@@ -1,3 +1,6 @@
+// terrain generation impl - GenerateTerrain orchestrates the pipeline
+// SampleHeight, CarvePaths, BuildDefenderSlots, BuildMesh, dressing, border walls
+
 #include "Terrain/ProceduralTerrainActor.h"
 #include "ProceduralMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -6,8 +9,7 @@
 
 namespace PortalTerrainVisual
 {
-	// Solid, opaque engine material — pack MI_Grass01 parents M_TreeGrass (WPO wind +
-	// masked atlas T_BaseColor) which rainbow-checkerboards and undulates on a heightfield.
+	// solid opaque base mat - pack grass uses WPO wind and looks awful on a heightfield
 	static UMaterialInterface* GetStableBaseMaterial()
 	{
 		return LoadObject<UMaterialInterface>(
@@ -38,9 +40,8 @@ AProceduralTerrainActor::AProceduralTerrainActor()
 	SetRootComponent(TerrainMesh);
 	TerrainMesh->bUseAsyncCooking = true;
 
-	// Do NOT assign pack foliage/atlas materials (MI_Grass01 / MI_DefaultPBR) to the
-	// procedural ground — they expect card UVs and drive World Position Offset wind.
-	// Stable tinted MIDs are created in BuildMesh from BasicShapeMaterial.
+	// don't use pack foliage mats on procedural ground - they expect card UVs and WPO wind
+	// BuildMesh makes tinted MIDs from BasicShapeMaterial instead
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> TreeAsset(
 		TEXT("/Game/RPGTinyFantasyForest/Mesh/TreePlant/SM_TreeB.SM_TreeB"));
@@ -69,9 +70,10 @@ void AProceduralTerrainActor::BeginPlay()
 	GenerateTerrain();
 }
 
+// master entry - reseed, height grid, then carve paths / pads / mesh / props / walls
 void AProceduralTerrainActor::GenerateTerrain()
 {
-	// Requirement: terrain different every launch via randomized seed.
+	// random seed each launch when bUseRandomSeed is on - drives all the noise
 	if (bUseRandomSeed)
 	{
 		Seed = FMath::RandRange(1, MAX_int32 / 2);
@@ -80,7 +82,7 @@ void AProceduralTerrainActor::GenerateTerrain()
 	Resolution = FMath::Max(17, Resolution);
 	if (Resolution % 2 == 0)
 	{
-		++Resolution; // keep odd so a true center cell exists
+		++Resolution; // odd grid = real center cell for tower
 	}
 
 	CenterX = Resolution / 2;
@@ -106,7 +108,7 @@ void AProceduralTerrainActor::GenerateTerrain()
 	BuildDefenderSlots();
 	BuildMesh();
 
-	// Tower site before dressing so plaza clearance can use world distance.
+	// tower loc before dressing so plaza clearance can use world distance
 	TowerWorldLocation = GridToWorld(CenterX, CenterY, Heights[Index(CenterX, CenterY)]);
 	TowerWorldLocation.Z += 20.f;
 
@@ -117,9 +119,9 @@ void AProceduralTerrainActor::GenerateTerrain()
 		Seed, Paths.Num(), DefenderSlots.Num(), DressingComponents.Num());
 }
 
+// seeded 2D noise + radial bowl so the center plaza stays flatter
 float AProceduralTerrainActor::SampleHeight(int32 X, int32 Y) const
 {
-	// Lightweight value-noise style heightfield (no external assets).
 	auto Hash01 = [this](int32 IX, int32 IY) -> float
 	{
 		uint32 N = static_cast<uint32>(IX * 374761393 + IY * 668265263 + Seed * 1274126177);
@@ -142,7 +144,7 @@ float AProceduralTerrainActor::SampleHeight(int32 X, int32 Y) const
 	const float D = Hash01(X0 + 1, Y0 + 1);
 	const float Z = FMath::Lerp(FMath::Lerp(A, B, SX), FMath::Lerp(C, D, SX), SY);
 
-	// Soft bowl so the center (tower) sits on flatter ground.
+	// soft bowl - tower area is less hilly
 	const float NX = (X - CenterX) / static_cast<float>(CenterX);
 	const float NY = (Y - CenterY) / static_cast<float>(CenterY);
 	const float Dist = FMath::Sqrt(NX * NX + NY * NY);
@@ -247,12 +249,12 @@ bool AProceduralTerrainActor::TryGetRandomOffPathLocation(FVector& OutLocation, 
 
 	TArray<FIntPoint> Candidates;
 	Candidates.Reserve(Resolution * Resolution / 4);
-	// Keep coins / player spawn inward of the rim border (cells 0 / Resolution-1).
+	// stay inward of rim border (cells 0 and Resolution-1)
 	for (int32 Y = 3; Y < Resolution - 3; ++Y)
 	{
 		for (int32 X = 3; X < Resolution - 3; ++X)
 		{
-			// Keep coins / player spawn clear of the walkable road (not just the exact cell).
+			// not on the road itself (plus one cell buffer)
 			if (IsOnOrNearPath(X, Y, 1))
 			{
 				continue;
@@ -260,7 +262,7 @@ bool AProceduralTerrainActor::TryGetRandomOffPathLocation(FVector& OutLocation, 
 			const int32 DistToCenter = FMath::Abs(X - CenterX) + FMath::Abs(Y - CenterY);
 			if (DistToCenter < 4)
 			{
-				continue; // keep tower plaza clear
+				continue; // keep plaza clear
 			}
 			Candidates.Add(FIntPoint(X, Y));
 		}
@@ -315,8 +317,8 @@ void AProceduralTerrainActor::ClearMapBorder()
 
 void AProceduralTerrainActor::SpawnMapBorder()
 {
-	// Continuous dark stone walls just outside the mesh rim so the FPS pawn bump-stops
-	// at the edge. Path starts sit on cells 1..(Resolution-2), so they stay clear.
+	// dark stone walls outside the mesh rim - player bumps into these at the edge
+	// path starts are on inner cells so mouths stay open
 	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (!CubeMesh || Heights.Num() == 0)
 	{
@@ -326,11 +328,11 @@ void AProceduralTerrainActor::SpawnMapBorder()
 	const float Half = (Resolution - 1) * CellSize * 0.5f;
 	const float Thickness = FMath::Max(20.f, BorderWallThickness);
 	const float WallH = FMath::Max(50.f, BorderWallHeight);
-	// Sit just outside the outermost vertices; small overlap so corners seal.
+	// slightly outside outer verts, overlap at corners so no gaps
 	const float Rim = Half + Thickness * 0.5f;
 	const float Length = (Half + Thickness) * 2.f;
 
-	// Sample rim height so walls sit on the ground rather than floating.
+	// sample rim height so walls sit on ground not floating
 	auto RimGroundZ = [this](int32 X, int32 Y) -> float
 	{
 		X = FMath::Clamp(X, 0, Resolution - 1);
@@ -348,7 +350,7 @@ void AProceduralTerrainActor::SpawnMapBorder()
 	struct FWallSpec
 	{
 		FVector LocalCenter;
-		FVector Scale; // Engine cube is 100uu; Scale = desired_size / 100
+		FVector Scale; // engine cube is 100uu, scale = desired / 100
 	};
 
 	const float S = 0.01f; // 100uu cube → world size via scale
@@ -385,7 +387,7 @@ void AProceduralTerrainActor::SpawnMapBorder()
 		BorderWallComponents.Add(Comp);
 	}
 
-	// Sparse rock markers along each rim for a clearer "stone border" read.
+	// extra rocks along the rim so the border reads as stone
 	if (RockMeshes.Num() == 0)
 	{
 		return;
@@ -412,7 +414,7 @@ void AProceduralTerrainActor::SpawnMapBorder()
 		Comp->SetRelativeRotation(FRotator(0.f, Yaw, 0.f));
 		const float Scale = Stream.FRandRange(1.1f, 1.8f);
 		Comp->SetRelativeScale3D(FVector(Scale, Scale, Scale * Stream.FRandRange(1.2f, 1.8f)));
-		// Visual only — cubes already block; avoid double-collision snags on path mouths.
+		// visual only - cubes already block, rocks are just decoration
 		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Comp->SetGenerateOverlapEvents(false);
 		Comp->SetCastShadow(true);
@@ -451,19 +453,19 @@ void AProceduralTerrainActor::SpawnEnvironmentDressing()
 	{
 		for (int32 X = 2; X < Resolution - 2; ++X)
 		{
-			// Expand exclusion so large rock/tree meshes cannot overhang the road.
+			// wider exclusion so big meshes don't overhang the path
 			if (IsOnOrNearPath(X, Y, PathClearance))
 			{
 				continue;
 			}
-			// Generous plaza around CentralTower / portal mesh (Chebyshev cells).
+			// empty plaza around tower / portal (chebyshev cells)
 			const int32 ChebyshevToTower = FMath::Max(FMath::Abs(X - CenterX), FMath::Abs(Y - CenterY));
 			if (ChebyshevToTower < TowerClearCells)
 			{
 				continue;
 			}
 			const FVector World = GridToWorld(X, Y, Heights[Index(X, Y)]);
-			// World-radius backup so overhanging meshes cannot sit under/inside the portal.
+			// world radius backup - stops props clipping into the portal mesh
 			if (FVector::DistSquared2D(World, TowerWorldLocation) < TowerClearRadiusSq)
 			{
 				continue;
@@ -500,13 +502,13 @@ void AProceduralTerrainActor::SpawnEnvironmentDressing()
 		Comp->SetupAttachment(GetRootComponent());
 		Comp->SetStaticMesh(Mesh);
 
-		// FPS pawn bumps into props; enemies move by code along paths (dressing is off-path).
-		// Uses mesh simple collision (pack rocks/trees); QueryAndPhysics for runtime components.
+		// player bumps props, enemies ignore them (they follow waypoints off-path)
+		// mesh simple collision, QueryAndPhysics for runtime components
 		Comp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		Comp->SetCollisionObjectType(ECC_WorldStatic);
 		Comp->SetCollisionResponseToAllChannels(ECR_Block);
 		Comp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
-		// Projectiles are WorldDynamic and ignore props in ApplyHitTo; skip overlap spam.
+		// projectiles are WorldDynamic and ignore props in ApplyHitTo
 		Comp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
 		Comp->SetGenerateOverlapEvents(false);
 		Comp->SetCastShadow(true);
@@ -539,9 +541,10 @@ void AProceduralTerrainActor::SpawnEnvironmentDressing()
 	}
 }
 
+// carve winding paths from map edges to center - enemies follow the waypoint lists
 void AProceduralTerrainActor::CarvePaths()
 {
-	// Requirement: at least THREE distinct pathways leading to the central tower.
+	// at least 3 paths to the tower (NumPaths can go higher)
 	FRandomStream Stream(Seed ^ 0xA5A5A5A5);
 	const int32 PathCount = FMath::Max(3, NumPaths);
 
@@ -551,7 +554,7 @@ void AProceduralTerrainActor::CarvePaths()
 		const float Jitter = Stream.FRandRange(-0.35f, 0.35f);
 		const float Angle = BaseAngle + Jitter;
 
-		// Start on the perimeter, end at center.
+		// start on perimeter, end at center
 		const float Radius = (Resolution - 3) * 0.5f;
 		int32 X = CenterX + FMath::RoundToInt(FMath::Cos(Angle) * Radius);
 		int32 Y = CenterY + FMath::RoundToInt(FMath::Sin(Angle) * Radius);
@@ -572,7 +575,7 @@ void AProceduralTerrainActor::CarvePaths()
 				break;
 			}
 
-			// Biased walk toward center with seeded wiggle for unique routes each launch.
+			// biased walk toward center with random wiggle so routes feel different each seed
 			const int32 DX = FMath::Clamp(CenterX - X, -1, 1);
 			const int32 DY = FMath::Clamp(CenterY - Y, -1, 1);
 			int32 StepX = DX;
@@ -594,7 +597,7 @@ void AProceduralTerrainActor::CarvePaths()
 			Y = NY;
 		}
 
-		// Widen path and flatten height so enemies have a clear road.
+		// widen path and flatten height - enemies get a clear road
 		const float PathHeight = MaxHeight * 0.18f;
 		for (const FIntPoint& Cell : Cells)
 		{
@@ -614,7 +617,7 @@ void AProceduralTerrainActor::CarvePaths()
 			}
 		}
 
-		// Ordered waypoints for enemy movement (downsample for smoother travel).
+		// waypoints for enemy movement - downsample so they don't stutter every cell
 		for (int32 I = 0; I < Cells.Num(); ++I)
 		{
 			if (I == 0 || I == Cells.Num() - 1 || (I % 2) == 0)
@@ -630,7 +633,7 @@ void AProceduralTerrainActor::CarvePaths()
 		Paths.Add(Path);
 	}
 
-	// Flatten a small plaza under the tower.
+	// flatten small plaza under tower
 	for (int32 OY = -2; OY <= 2; ++OY)
 	{
 		for (int32 OX = -2; OX <= 2; ++OX)
@@ -645,19 +648,19 @@ void AProceduralTerrainActor::CarvePaths()
 	}
 }
 
+// yellow build pads beside paths - 3-pass: per-path bands, angular fill, score fallback
 void AProceduralTerrainActor::BuildDefenderSlots()
 {
-	// At least 3 pads per pathway: off-path flanks, mid-to-late along each route, spaced apart.
 	FRandomStream Stream(Seed ^ 0x5C5C5C5C);
 	constexpr int32 MinPadsPerPath = 3;
 	const int32 DesiredSlots = FMath::Max(MinPadsPerPath * Paths.Num(), MinPadsPerPath * 3);
 	const int32 MinDistCells = 4;
 	const float MinDistWorld = MinDistCells * CellSize;
 	const float MinDistWorldSq = MinDistWorld * MinDistWorld;
-	// ADefenderPlacementSpot uses Engine cylinder (origin center, half-height 50) × Z scale 0.15.
+	// ADefenderPlacementSpot uses engine cylinder, origin at center, half-height 50 * z scale 0.15
 	const float PadHalfHeight = 50.f * 0.15f;
 
-	// Spread three pads along each path: early-mid, mid, late (still off-path / not on road).
+	// three pads per path spread along early-mid / mid / late sections
 	const float BandMin[MinPadsPerPath] = { 0.34f, 0.50f, 0.66f };
 	const float BandMax[MinPadsPerPath] = { 0.50f, 0.66f, 0.86f };
 
@@ -774,7 +777,7 @@ void AProceduralTerrainActor::BuildDefenderSlots()
 		return AddSlotAtCell(Cand.Cell);
 	};
 
-	// 1) Guarantee ≥ MinPadsPerPath flanks per pathway, spread across progress bands.
+	// 1) at least MinPadsPerPath per pathway in progress bands
 	for (int32 PathIdx = 0; PathIdx < Paths.Num(); ++PathIdx)
 	{
 		for (int32 Band = 0; Band < MinPadsPerPath; ++Band)
@@ -795,10 +798,10 @@ void AProceduralTerrainActor::BuildDefenderSlots()
 					continue;
 				}
 				Best = &Cand;
-				break; // Candidates already score-sorted
+				break; // already sorted by score
 			}
 
-			// Soften spacing, then ignore band, rather than leave a path under-padded.
+			// relax spacing before giving up on a path
 			if (!Best)
 			{
 				for (const FPadCandidate& Cand : Candidates)
@@ -823,7 +826,7 @@ void AProceduralTerrainActor::BuildDefenderSlots()
 		}
 	}
 
-	// 2) Fill remaining toward DesiredSlots with angular spread.
+	// 2) fill up to DesiredSlots with even angular spread
 	if (DefenderSlots.Num() < DesiredSlots)
 	{
 		const float AngleJitter = Stream.FRandRange(0.f, 2.f * PI);
@@ -857,7 +860,7 @@ void AProceduralTerrainActor::BuildDefenderSlots()
 		}
 	}
 
-	// 3) Fallback: top remaining scores.
+	// 3) whatever's left from top scores
 	for (const FPadCandidate& Cand : Candidates)
 	{
 		if (DefenderSlots.Num() >= DesiredSlots)
@@ -872,6 +875,7 @@ void AProceduralTerrainActor::BuildDefenderSlots()
 		DefenderSlots.Num(), Paths.Num(), MinPadsPerPath);
 }
 
+// turn height grid into grass + dirt path mesh sections
 void AProceduralTerrainActor::BuildMesh()
 {
 	TArray<FVector> GrassVerts;
@@ -900,7 +904,7 @@ void AProceduralTerrainActor::BuildMesh()
 		Verts.Add(V2);
 		Verts.Add(V3);
 
-		// Flat normal from the actual quad so hills shade correctly (no WPO needed).
+		// flat normal from quad verts so hills shade ok without WPO
 		FVector N = FVector::CrossProduct(V2 - V0, V1 - V0).GetSafeNormal();
 		if (N.IsNearlyZero() || N.Z < 0.f)
 		{
@@ -928,10 +932,10 @@ void AProceduralTerrainActor::BuildMesh()
 		Tris.Add(Base + 2);
 	};
 
-	// Distinct stable ground colors (opaque BasicShapeMaterial MIDs — no atlas / WPO).
+	// simple grass/dirt colors on opaque basic shape MIDs - no atlas or WPO
 	const FLinearColor GrassColor(0.22f, 0.58f, 0.24f);
 	const FLinearColor PathColor(0.42f, 0.30f, 0.16f);
-	// World-space UV tiling (~1 repeat per 4 cells) for any future textured override.
+	// world UV tiling ~1 repeat per 4 cells if we swap in real textures later
 	const float UVTilesPerCell = 0.25f;
 
 	for (int32 Y = 0; Y < Resolution - 1; ++Y)
@@ -969,7 +973,7 @@ void AProceduralTerrainActor::BuildMesh()
 	TerrainMesh->CreateMeshSection_LinearColor(1, PathVerts, PathTris, PathNormals, PathUV, PathColors, PathTangents, true);
 	TerrainMesh->ContainsPhysicsTriMeshData(true);
 
-	// Prefer explicit stable overrides; otherwise tint BasicShapeMaterial (never foliage WPO mats).
+	// explicit override or tinted basic shape - never foliage WPO mats
 	if (GrassMaterial)
 	{
 		TerrainMesh->SetMaterial(0, GrassMaterial);
