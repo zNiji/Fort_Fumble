@@ -2,6 +2,7 @@
 
 #include "Enemy/EnemyUnit.h"
 #include "Enemy/EnemyProjectile.h"
+#include "Game/PortalProtectGameMode.h"
 #include "Tower/CentralTower.h"
 #include "Defender/DefenderUnit.h"
 #include "Animation/AnimSequence.h"
@@ -127,6 +128,14 @@ void AEnemyUnit::ApplyDamage(float Amount)
 	RefreshDamageVisual();
 	if (Health <= 0.f)
 	{
+		// pay out kill points before we vanish
+		if (UWorld* World = GetWorld())
+		{
+			if (APortalProtectGameMode* GM = World->GetAuthGameMode<APortalProtectGameMode>())
+			{
+				GM->AddScore(GM->GetPointsPerKill());
+			}
+		}
 		Destroy();
 	}
 }

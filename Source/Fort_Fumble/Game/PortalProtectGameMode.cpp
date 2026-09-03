@@ -29,6 +29,7 @@ void APortalProtectGameMode::BeginPlay()
 	Super::BeginPlay();
 	DefendersRemaining = StartingDefenders;
 	CoinBalance = StartingCoins;
+	Score = 0;
 	bGameOver = false;
 	StatusMessage.Empty();
 	PlayerPlaceAttempts = 0;
@@ -36,6 +37,8 @@ void APortalProtectGameMode::BeginPlay()
 
 	// pawn might not exist yet at game mode BeginPlay - retry until possessed
 	GetWorldTimerManager().SetTimer(PlayerPlaceTimer, this, &APortalProtectGameMode::PlacePlayerOnTerrain, 0.05f, true);
+	// survival points while the portal is still standing
+	GetWorldTimerManager().SetTimer(SurvivalScoreTimer, this, &APortalProtectGameMode::TickSurvivalScore, 1.0f, true);
 }
 
 // spawn terrain, tower, spawners, pads - wire everything to generated terrain data
@@ -190,6 +193,24 @@ void APortalProtectGameMode::AddCoins(int32 Amount)
 	SetStatusMessage(FString::Printf(TEXT("+%d coins"), Amount), 1.2f);
 }
 
+void APortalProtectGameMode::AddScore(int32 Amount)
+{
+	if (Amount <= 0 || bGameOver)
+	{
+		return;
+	}
+	Score += Amount;
+}
+
+void APortalProtectGameMode::TickSurvivalScore()
+{
+	if (bGameOver)
+	{
+		return;
+	}
+	AddScore(SurvivalPointsPerSecond);
+}
+
 void APortalProtectGameMode::SetStatusMessage(const FString& Message, float Duration)
 {
 	StatusMessage = Message;
@@ -211,6 +232,7 @@ int32 APortalProtectGameMode::GetTerrainSeed() const
 void APortalProtectGameMode::NotifyTowerDestroyed()
 {
 	bGameOver = true;
+	GetWorldTimerManager().ClearTimer(SurvivalScoreTimer);
 	if (Spawner)
 	{
 		Spawner->SetSpawningEnabled(false);
