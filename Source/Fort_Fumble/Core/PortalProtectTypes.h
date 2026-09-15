@@ -4,6 +4,15 @@
 #include "CoreMinimal.h"
 #include "PortalProtectTypes.generated.h"
 
+// slime = baseline, runner = fast cactus, tank = heavy chest monster
+UENUM(BlueprintType)
+enum class EEnemyType : uint8
+{
+	Slime UMETA(DisplayName = "Slime"),
+	Runner UMETA(DisplayName = "Runner"),
+	Tank UMETA(DisplayName = "Tank")
+};
+
 // one enemy route - waypoints from map edge to the tower
 USTRUCT(BlueprintType)
 struct FPortalPath

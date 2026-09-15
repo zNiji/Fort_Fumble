@@ -110,8 +110,14 @@ public:
 
 	ACentralTower* GetTower() const { return Tower; }
 
+	UFUNCTION(BlueprintPure, Category = "PortalProtect")
+	AEnemySpawner* GetEnemySpawner() const { return Spawner; }
 
+	UFUNCTION(BlueprintPure, Category = "PortalProtect|Waves")
+	int32 GetCurrentWave() const;
 
+	UFUNCTION(BlueprintPure, Category = "PortalProtect|Waves")
+	int32 GetEnemiesRemainingInWave() const;
 	UFUNCTION(BlueprintPure, Category = "PortalProtect")
 
 	int32 GetTerrainSeed() const;

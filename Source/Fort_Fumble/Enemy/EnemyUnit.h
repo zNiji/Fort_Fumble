@@ -1,16 +1,19 @@
-// slime enemy - follows path waypoints, stops to shoot tower or cannons
+// enemy unit - slime / runner / tank, pathing + combat + HP bar
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Core/PortalProtectTypes.h"
 #include "EnemyUnit.generated.h"
 
 class USkeletalMeshComponent;
 class USphereComponent;
+class UWidgetComponent;
 class UAnimSequence;
 class ACentralTower;
 class ADefenderUnit;
 class AEnemyProjectile;
+class UEnemyHealthBarWidget;
 
 UCLASS()
 class FORT_FUMBLE_API AEnemyUnit : public AActor
@@ -23,6 +26,10 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 
+	// pick mesh/stats/anims for slime, runner, or tank
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void InitializeAsType(EEnemyType InType);
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void InitializeOnPath(const TArray<FVector>& InWaypoints);
 
@@ -34,6 +41,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Enemy")
 	float GetHealth() const { return Health; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	float GetMaxHealthValue() const { return MaxHealth; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	EEnemyType GetEnemyType() const { return EnemyType; }
+
+	UFUNCTION(BlueprintPure, Category = "Enemy")
+	int32 GetKillScore() const { return KillScore; }
+
+	UPROPERTY(EditAnywhere, Category = "Enemy")
+	EEnemyType EnemyType = EEnemyType::Slime;
 
 	UPROPERTY(EditAnywhere, Category = "Enemy")
 	float MaxHealth = 70.f;
@@ -54,6 +73,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Enemy|Combat")
 	float ProjectileSpeed = 900.f;
 
+	// runners skip projectiles and slap whatever is in melee range
+	UPROPERTY(EditAnywhere, Category = "Enemy|Combat")
+	bool bUsesProjectile = true;
+
 	// how far out they'll notice defenders - doesn't stop walk until EngageStopFactor
 	UPROPERTY(EditAnywhere, Category = "Enemy|Combat")
 	float DefenderAggroRange = 750.f;
@@ -66,11 +89,15 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Enemy|Combat")
 	float TowerAttackRange = 850.f;
 
+	// score paid when this unit dies
+	UPROPERTY(EditAnywhere, Category = "Enemy")
+	int32 KillScore = 40;
+
 	// scale after auto-fit to TargetHeight
 	UPROPERTY(EditAnywhere, Category = "Enemy|Visual", meta = (ClampMin = "0.05"))
 	float MeshScale = 1.f;
 
-	// how tall the slime should look on the path (uu)
+	// how tall the unit should look on the path (uu)
 	UPROPERTY(EditAnywhere, Category = "Enemy|Visual", meta = (ClampMin = "20"))
 	float TargetHeight = 90.f;
 
@@ -81,19 +108,29 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Enemy|Visual")
 	float MeshYawOffset = 180.f;
 
+	UPROPERTY(EditAnywhere, Category = "Enemy|Visual")
+	FLinearColor MeshTint = FLinearColor::White;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USphereComponent> Collision;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USkeletalMeshComponent> Mesh;
 
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UWidgetComponent> HealthBar;
+
 private:
 	void MoveAlongPath(float DeltaTime);
 	// defenders first, else tower - returns true when in combat (may pause walk)
 	bool TryAttackEnemyTargets(float DeltaTime);
 	void FireProjectileAt(AActor* Target);
+	void MeleeHit(AActor* Target);
 	void UpdateFacing(const FVector& WorldDirection, float DeltaTime);
 	void UpdateLocomotionAnim(bool bMoving);
+	void UpdateHealthBar();
+	void ApplyMeshSetup(USkeletalMesh* InMesh, UAnimSequence* InIdle, UAnimSequence* InWalk);
+	void ApplyTint();
 	ADefenderUnit* FindNearbyDefender(float Range) const;
 	ACentralTower* FindTower() const;
 	void RefreshDamageVisual();
@@ -106,6 +143,7 @@ private:
 	bool bInitialized = false;
 	bool bUsingMonsterMesh = false;
 	bool bCombatEngaged = false;
+	bool bTypeConfigured = false;
 
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> IdleAnim;

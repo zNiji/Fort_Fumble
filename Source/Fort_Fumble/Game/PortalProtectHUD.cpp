@@ -70,16 +70,22 @@ void APortalProtectHUD::DrawHUD()
 	const float TowerHP = Tower ? Tower->GetHealth() : 0.f;
 	const float TowerMax = Tower ? Tower->GetMaxHealth() : 1.f;
 
+	const int32 WaveNum = GM->GetCurrentWave();
+	const int32 EnemiesLeft = GM->GetEnemiesRemainingInWave();
+
 	const FString Line1 = FString::Printf(TEXT("PORTAL PROTECT  |  Seed: %d"), GM->GetTerrainSeed());
-	const FString Line2 = FString::Printf(TEXT("Tower HP: %.0f / %.0f"), TowerHP, TowerMax);
-	const FString Line3 = FString::Printf(TEXT("Coins: %d   |   Defender cost: %d   |   Places left: %d"),
+	const FString Line2 = FString::Printf(TEXT("Wave: %d   |   Enemies left: %d"),
+		WaveNum > 0 ? WaveNum : 1, EnemiesLeft);
+	const FString Line3 = FString::Printf(TEXT("Tower HP: %.0f / %.0f"), TowerHP, TowerMax);
+	const FString Line4 = FString::Printf(TEXT("Coins: %d   |   Defender cost: %d   |   Places left: %d"),
 		GM->GetCoinBalance(), GM->GetDefenderCost(), GM->GetDefendersRemaining());
-	const FString Line4 = TEXT("WASD move  |  Mouse look  |  Space jump  |  LMB place  |  Esc/P pause  |  R restart");
+	const FString Line5 = TEXT("WASD move  |  Mouse look  |  Space jump  |  LMB place  |  Esc/P pause  |  R restart");
 
 	DrawText(Line1, FLinearColor::White, 40.f, 82.f, BodyFont, 1.2f);
-	DrawText(Line2, FLinearColor(0.6f, 0.85f, 1.f), 40.f, 112.f, BodyFont, 1.2f);
-	DrawText(Line3, FLinearColor(1.f, 0.9f, 0.3f), 40.f, 142.f, BodyFont, 1.2f);
-	DrawText(Line4, FLinearColor(0.9f, 0.9f, 0.7f), 40.f, 172.f, BodyFont, 1.05f);
+	DrawText(Line2, FLinearColor(1.f, 0.55f, 0.35f), 40.f, 112.f, BodyFont, 1.2f);
+	DrawText(Line3, FLinearColor(0.6f, 0.85f, 1.f), 40.f, 142.f, BodyFont, 1.2f);
+	DrawText(Line4, FLinearColor(1.f, 0.9f, 0.3f), 40.f, 172.f, BodyFont, 1.2f);
+	DrawText(Line5, FLinearColor(0.9f, 0.9f, 0.7f), 40.f, 202.f, BodyFont, 1.05f);
 
 	const float CX = Canvas->SizeX * 0.5f;
 	const float CY = Canvas->SizeY * 0.5f;
@@ -89,6 +95,6 @@ void APortalProtectHUD::DrawHUD()
 	const FString Status = GM->GetStatusMessage();
 	if (!Status.IsEmpty())
 	{
-		DrawText(Status, FLinearColor(1.f, 0.75f, 0.35f), 40.f, 206.f, BodyFont, 1.15f);
+		DrawText(Status, FLinearColor(1.f, 0.75f, 0.35f), 40.f, 236.f, BodyFont, 1.15f);
 	}
 }

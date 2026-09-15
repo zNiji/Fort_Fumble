@@ -1,90 +1,86 @@
-// spawns slime waves on a timer from each path start, round-robin between paths
+// wave spawner - builds compositions, rests between waves, waits for clear
 
 #pragma once
 
-
-
 #include "CoreMinimal.h"
-
 #include "GameFramework/Actor.h"
-
 #include "Core/PortalProtectTypes.h"
-
 #include "EnemySpawner.generated.h"
 
-
-
 class AEnemyUnit;
-
 class AProceduralTerrainActor;
 
-
-
-UCLASS()
-
-class FORT_FUMBLE_API AEnemySpawner : public AActor
-
+UENUM(BlueprintType)
+enum class EWavePhase : uint8
 {
-
-	GENERATED_BODY()
-
-
-
-public:
-
-	AEnemySpawner();
-
-
-
-	virtual void BeginPlay() override;
-
-	virtual void Tick(float DeltaTime) override;
-
-
-
-	UFUNCTION(BlueprintCallable, Category = "Spawner")
-
-	void Configure(AProceduralTerrainActor* InTerrain);
-
-
-
-	UFUNCTION(BlueprintCallable, Category = "Spawner")
-
-	void SetSpawningEnabled(bool bEnabled);
-
-
-
-	UPROPERTY(EditAnywhere, Category = "Spawner")
-
-	float SpawnInterval = 3.6f;
-
-
-
-	UPROPERTY(EditAnywhere, Category = "Spawner")
-
-	TSubclassOf<AEnemyUnit> EnemyClass;
-
-
-
-private:
-
-	void SpawnEnemy();
-
-
-
-	UPROPERTY()
-
-	TObjectPtr<AProceduralTerrainActor> Terrain;
-
-
-
-	TArray<FPortalPath> CachedPaths;
-
-	float SpawnTimer = 1.5f;
-
-	bool bSpawningEnabled = true;
-
-	int32 NextPathIndex = 0;
-
+	Resting,
+	Spawning,
+	WaitingClear
 };
 
+UCLASS()
+class FORT_FUMBLE_API AEnemySpawner : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	AEnemySpawner();
+
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
+
+	UFUNCTION(BlueprintCallable, Category = "Spawner")
+	void Configure(AProceduralTerrainActor* InTerrain);
+
+	UFUNCTION(BlueprintCallable, Category = "Spawner")
+	void SetSpawningEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category = "Spawner")
+	int32 GetCurrentWave() const { return CurrentWave; }
+
+	UFUNCTION(BlueprintPure, Category = "Spawner")
+	int32 GetEnemiesRemaining() const;
+
+	UFUNCTION(BlueprintPure, Category = "Spawner")
+	int32 GetEnemiesLeftToSpawn() const { return EnemiesLeftToSpawn; }
+
+	UFUNCTION(BlueprintPure, Category = "Spawner")
+	EWavePhase GetWavePhase() const { return WavePhase; }
+
+	// seconds between fully clearing a wave and starting the next
+	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
+	float RestDuration = 6.5f;
+
+	// gap between individual spawns inside a wave
+	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
+	float SpawnInterval = 1.35f;
+
+	// safety: if a stuck enemy blocks forever, force next wave after this
+	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
+	float MaxClearWait = 50.f;
+
+	UPROPERTY(EditAnywhere, Category = "Spawner")
+	TSubclassOf<AEnemyUnit> EnemyClass;
+
+private:
+	void BeginWave(int32 WaveNumber);
+	void BuildWaveComposition(int32 WaveNumber);
+	void SpawnNextFromQueue();
+	void CleanupDeadRefs();
+	EEnemyType PickTypeForWave(int32 WaveNumber, FRandomStream& Rng) const;
+
+	UPROPERTY()
+	TObjectPtr<AProceduralTerrainActor> Terrain;
+
+	TArray<FPortalPath> CachedPaths;
+	TArray<EEnemyType> SpawnQueue;
+	TArray<TWeakObjectPtr<AEnemyUnit>> AliveThisWave;
+
+	EWavePhase WavePhase = EWavePhase::Resting;
+	int32 CurrentWave = 0;
+	int32 EnemiesLeftToSpawn = 0;
+	int32 NextPathIndex = 0;
+	float PhaseTimer = 2.0f;
+	float ClearWaitTimer = 0.f;
+	bool bSpawningEnabled = true;
+};

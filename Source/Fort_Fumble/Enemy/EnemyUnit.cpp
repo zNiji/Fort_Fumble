@@ -1,17 +1,20 @@
-// slime pathing, combat, idle/walk anims
+// pathing, combat, type setup, idle/walk anims, HP bar
 
 #include "Enemy/EnemyUnit.h"
 #include "Enemy/EnemyProjectile.h"
+#include "Enemy/EnemyHealthBarWidget.h"
 #include "Game/PortalProtectGameMode.h"
 #include "Tower/CentralTower.h"
 #include "Defender/DefenderUnit.h"
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/WidgetComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
 AEnemyUnit::AEnemyUnit()
@@ -32,33 +35,32 @@ AEnemyUnit::AEnemyUnit()
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetGenerateOverlapEvents(false);
 	Mesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-	// slime mesh facing - rel yaw +90 then MeshYawOffset 180 so they don't walk backward
+	// pack meshes face +X-ish - rel yaw +90 then MeshYawOffset so they don't moonwalk
 	Mesh->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 
-	// main enemy visual - slime from monster pack, single-node idle/walk (no anim BP)
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MonsterAsset(
+	HealthBar = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBar"));
+	HealthBar->SetupAttachment(Collision);
+	HealthBar->SetWidgetSpace(EWidgetSpace::Screen);
+	HealthBar->SetDrawAtDesiredSize(false);
+	HealthBar->SetDrawSize(FVector2D(90.f, 12.f));
+	HealthBar->SetPivot(FVector2D(0.5f, 1.f));
+	HealthBar->SetRelativeLocation(FVector(0.f, 0.f, 110.f));
+	HealthBar->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HealthBar->SetWidgetClass(UEnemyHealthBarWidget::StaticClass());
+
+	// default constructor load = slime so BP/default spawn still looks ok before InitializeAsType
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> SoftSlimeMesh(
 		TEXT("/Game/MonsterForSurvivalGame/Mesh/PBR/Slime_SK.Slime_SK"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleAsset(
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> SoftSlimeIdle(
 		TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Slime/Slime_IdleNormal_ANIM.Slime_IdleNormal_ANIM"));
-	static ConstructorHelpers::FObjectFinder<UAnimSequence> WalkAsset(
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> SoftSlimeWalk(
 		TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Slime/Slime_Walk_ANIM.Slime_Walk_ANIM"));
 
-	if (MonsterAsset.Succeeded())
+	if (SoftSlimeMesh.Succeeded())
 	{
-		Mesh->SetSkeletalMesh(MonsterAsset.Object);
-		const FBoxSphereBounds Bounds = MonsterAsset.Object->GetBounds();
-		const float MeshHeight = FMath::Max(Bounds.BoxExtent.Z * 2.f, 1.f);
-		BaseMeshScale = FMath::Clamp(TargetHeight / MeshHeight, 0.15f, 2.5f);
-		MeshScale = BaseMeshScale;
-		Mesh->SetRelativeScale3D(FVector(BaseMeshScale));
-
-		// lift mesh so feet sit on path surface
-		const float BottomZ = Bounds.Origin.Z - Bounds.BoxExtent.Z;
-		Mesh->SetRelativeLocation(FVector(0.f, 0.f, -BottomZ * BaseMeshScale));
-
-		const float Radius = FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y) * BaseMeshScale * 0.85f;
-		Collision->SetSphereRadius(FMath::Clamp(Radius, 28.f, 55.f));
-		bUsingMonsterMesh = true;
+		ApplyMeshSetup(SoftSlimeMesh.Object,
+			SoftSlimeIdle.Succeeded() ? SoftSlimeIdle.Object : nullptr,
+			SoftSlimeWalk.Succeeded() ? SoftSlimeWalk.Object : nullptr);
 	}
 	else
 	{
@@ -68,26 +70,182 @@ AEnemyUnit::AEnemyUnit()
 		bUsingMonsterMesh = false;
 	}
 
-	if (IdleAsset.Succeeded())
-	{
-		IdleAnim = IdleAsset.Object;
-	}
-	if (WalkAsset.Succeeded())
-	{
-		WalkAnim = WalkAsset.Object;
-	}
-
 	Health = MaxHealth;
 }
 
 void AEnemyUnit::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!bTypeConfigured)
+	{
+		InitializeAsType(EnemyType);
+	}
 	Health = MaxHealth;
 	RefreshDamageVisual();
 	UpdateLocomotionAnim(false);
-	UE_LOG(LogTemp, Log,
-		TEXT("[PortalProtect] Enemy slime facing: Mesh RelYaw=+90, MeshYawOffset=180 (actor faces move/aim dir)."));
+	UpdateHealthBar();
+}
+
+void AEnemyUnit::InitializeAsType(EEnemyType InType)
+{
+	EnemyType = InType;
+	bTypeConfigured = true;
+	CurrentAnim = nullptr;
+
+	USkeletalMesh* NewMesh = nullptr;
+	UAnimSequence* NewIdle = nullptr;
+	UAnimSequence* NewWalk = nullptr;
+
+	switch (EnemyType)
+	{
+	case EEnemyType::Runner:
+	{
+		// cactus - skinny and fast, short melee only
+		NewMesh = LoadObject<USkeletalMesh>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Mesh/PBR/Cactus_SK.Cactus_SK"));
+		NewIdle = LoadObject<UAnimSequence>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Cactus/Cactus_IdleNormal_ANIM.Cactus_IdleNormal_ANIM"));
+		NewWalk = LoadObject<UAnimSequence>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Cactus/Cactus_RunFWD_ANIM.Cactus_RunFWD_ANIM"));
+		MaxHealth = 38.f;
+		MoveSpeed = 390.f;
+		AttackDamage = 11.f;
+		AttackRange = 140.f;
+		AttackCooldown = 0.65f;
+		DefenderAggroRange = 220.f;
+		TowerAttackRange = 180.f;
+		EngageStopFactor = 0.95f;
+		bUsesProjectile = false;
+		ProjectileSpeed = 0.f;
+		TargetHeight = 72.f;
+		MeshYawOffset = 180.f;
+		MeshTint = FLinearColor(0.55f, 1.f, 0.35f);
+		KillScore = 25;
+		break;
+	}
+	case EEnemyType::Tank:
+	{
+		// chest monster - fat HP sponge, chunky projectiles
+		NewMesh = LoadObject<USkeletalMesh>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Mesh/PBR/ChestMonster_SK.ChestMonster_SK"));
+		NewIdle = LoadObject<UAnimSequence>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/ChestMonster/ChestMonster_IdleNormal_ANIM.ChestMonster_IdleNormal_ANIM"));
+		NewWalk = LoadObject<UAnimSequence>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/ChestMonster/ChestMonster_WalkFWD_ANIM.ChestMonster_WalkFWD_ANIM"));
+		MaxHealth = 220.f;
+		MoveSpeed = 115.f;
+		AttackDamage = 34.f;
+		AttackRange = 820.f;
+		AttackCooldown = 1.55f;
+		DefenderAggroRange = 820.f;
+		TowerAttackRange = 920.f;
+		EngageStopFactor = 0.88f;
+		bUsesProjectile = true;
+		ProjectileSpeed = 680.f;
+		TargetHeight = 135.f;
+		MeshYawOffset = 180.f;
+		MeshTint = FLinearColor(1.f, 0.45f, 0.35f);
+		KillScore = 70;
+		break;
+	}
+	case EEnemyType::Slime:
+	default:
+	{
+		NewMesh = LoadObject<USkeletalMesh>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Mesh/PBR/Slime_SK.Slime_SK"));
+		NewIdle = LoadObject<UAnimSequence>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Slime/Slime_IdleNormal_ANIM.Slime_IdleNormal_ANIM"));
+		NewWalk = LoadObject<UAnimSequence>(nullptr,
+			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Slime/Slime_Walk_ANIM.Slime_Walk_ANIM"));
+		MaxHealth = 70.f;
+		MoveSpeed = 220.f;
+		AttackDamage = 17.f;
+		AttackRange = 750.f;
+		AttackCooldown = 1.05f;
+		DefenderAggroRange = 750.f;
+		TowerAttackRange = 850.f;
+		EngageStopFactor = 0.9f;
+		bUsesProjectile = true;
+		ProjectileSpeed = 900.f;
+		TargetHeight = 90.f;
+		MeshYawOffset = 180.f;
+		MeshTint = FLinearColor(0.45f, 0.85f, 1.f);
+		KillScore = 40;
+		break;
+	}
+	}
+
+	if (NewMesh)
+	{
+		ApplyMeshSetup(NewMesh, NewIdle, NewWalk);
+		ApplyTint();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PortalProtect] InitializeAsType failed to load mesh for type %d"),
+			static_cast<int32>(EnemyType));
+	}
+
+	Health = MaxHealth;
+	UpdateHealthBar();
+	UpdateLocomotionAnim(false);
+
+	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Enemy type %d ready (HP=%.0f Speed=%.0f Projectile=%d)"),
+		static_cast<int32>(EnemyType), MaxHealth, MoveSpeed, bUsesProjectile ? 1 : 0);
+}
+
+void AEnemyUnit::ApplyMeshSetup(USkeletalMesh* InMesh, UAnimSequence* InIdle, UAnimSequence* InWalk)
+{
+	if (!InMesh || !Mesh)
+	{
+		return;
+	}
+
+	Mesh->SetSkeletalMesh(InMesh);
+	IdleAnim = InIdle;
+	WalkAnim = InWalk;
+
+	const FBoxSphereBounds Bounds = InMesh->GetBounds();
+	const float MeshHeight = FMath::Max(Bounds.BoxExtent.Z * 2.f, 1.f);
+	BaseMeshScale = FMath::Clamp(TargetHeight / MeshHeight, 0.12f, 3.f);
+	MeshScale = BaseMeshScale;
+	Mesh->SetRelativeScale3D(FVector(BaseMeshScale));
+
+	// lift mesh so feet sit on path surface
+	const float BottomZ = Bounds.Origin.Z - Bounds.BoxExtent.Z;
+	Mesh->SetRelativeLocation(FVector(0.f, 0.f, -BottomZ * BaseMeshScale));
+
+	const float Radius = FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y) * BaseMeshScale * 0.85f;
+	const float RadiusClampMax = (EnemyType == EEnemyType::Tank) ? 70.f : 55.f;
+	Collision->SetSphereRadius(FMath::Clamp(Radius, 24.f, RadiusClampMax));
+	bUsingMonsterMesh = true;
+
+	// sit HP bar above the scaled head
+	if (HealthBar)
+	{
+		const float BarZ = MeshHeight * BaseMeshScale * 0.55f + 35.f;
+		HealthBar->SetRelativeLocation(FVector(0.f, 0.f, BarZ));
+	}
+}
+
+void AEnemyUnit::ApplyTint()
+{
+	if (!Mesh)
+	{
+		return;
+	}
+
+	const int32 MatCount = Mesh->GetNumMaterials();
+	for (int32 i = 0; i < MatCount; ++i)
+	{
+		if (UMaterialInstanceDynamic* Mid = Mesh->CreateAndSetMaterialInstanceDynamic(i))
+		{
+			// pack mats vary - try a few common param names, no big deal if ignored
+			Mid->SetVectorParameterValue(TEXT("Color"), MeshTint);
+			Mid->SetVectorParameterValue(TEXT("BaseColor"), MeshTint);
+			Mid->SetVectorParameterValue(TEXT("Tint"), MeshTint);
+		}
+	}
 }
 
 // spawner passes waypoint list, snap to first path cell
@@ -126,17 +284,49 @@ void AEnemyUnit::ApplyDamage(float Amount)
 
 	Health = FMath::Max(0.f, Health - Amount);
 	RefreshDamageVisual();
+	UpdateHealthBar();
 	if (Health <= 0.f)
 	{
-		// pay out kill points before we vanish
+		if (HealthBar)
+		{
+			HealthBar->SetVisibility(false);
+			if (UEnemyHealthBarWidget* Bar = Cast<UEnemyHealthBarWidget>(HealthBar->GetUserWidgetObject()))
+			{
+				Bar->SetBarVisible(false);
+			}
+		}
+
+		// pay out kill points before we vanish (type-specific score)
 		if (UWorld* World = GetWorld())
 		{
 			if (APortalProtectGameMode* GM = World->GetAuthGameMode<APortalProtectGameMode>())
 			{
-				GM->AddScore(GM->GetPointsPerKill());
+				GM->AddScore(KillScore);
 			}
 		}
 		Destroy();
+	}
+}
+
+void AEnemyUnit::UpdateHealthBar()
+{
+	if (!HealthBar)
+	{
+		return;
+	}
+
+	UEnemyHealthBarWidget* Bar = Cast<UEnemyHealthBarWidget>(HealthBar->GetUserWidgetObject());
+	if (!Bar)
+	{
+		// widget may not exist until after BeginPlay init
+		HealthBar->InitWidget();
+		Bar = Cast<UEnemyHealthBarWidget>(HealthBar->GetUserWidgetObject());
+	}
+	if (Bar)
+	{
+		const float Pct = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
+		Bar->SetHealthPercent(Pct);
+		Bar->SetBarVisible(IsAlive());
 	}
 }
 
@@ -186,7 +376,7 @@ void AEnemyUnit::MoveAlongPath(float DeltaTime)
 	}
 }
 
-// pick defender or tower in range, spawn projectile on cooldown
+// pick defender or tower in range, spawn projectile / melee on cooldown
 bool AEnemyUnit::TryAttackEnemyTargets(float DeltaTime)
 {
 	bCombatEngaged = false;
@@ -254,7 +444,19 @@ bool AEnemyUnit::TryAttackEnemyTargets(float DeltaTime)
 		return true;
 	}
 
-	FireProjectileAt(TargetActor);
+	if (bUsesProjectile)
+	{
+		FireProjectileAt(TargetActor);
+	}
+	else
+	{
+		// runner melee - only land the hit when close
+		const float MeleeReach = AttackRange * 1.05f;
+		if (FVector::DistSquared2D(Origin, TargetActor->GetActorLocation()) <= MeleeReach * MeleeReach)
+		{
+			MeleeHit(TargetActor);
+		}
+	}
 	AttackTimer = AttackCooldown;
 	return true;
 }
@@ -279,8 +481,39 @@ void AEnemyUnit::FireProjectileAt(AActor* Target)
 		Shot->InitProjectile(Target, AttackDamage, ProjectileSpeed, this);
 	}
 
+	const FColor LineColor = (EnemyType == EEnemyType::Tank) ? FColor::Red : FColor::Orange;
 	DrawDebugLine(GetWorld(), Muzzle, Target->GetActorLocation() + FVector(0.f, 0.f, 40.f),
-		FColor::Orange, false, 0.1f, 0, 2.f);
+		LineColor, false, 0.1f, 0, EnemyType == EEnemyType::Tank ? 3.5f : 2.f);
+}
+
+void AEnemyUnit::MeleeHit(AActor* Target)
+{
+	if (!Target)
+	{
+		return;
+	}
+
+	if (ADefenderUnit* Defender = Cast<ADefenderUnit>(Target))
+	{
+		if (Defender->IsAlive())
+		{
+			Defender->ApplyDamage(AttackDamage);
+		}
+	}
+	else if (ACentralTower* Tower = Cast<ACentralTower>(Target))
+	{
+		if (Tower->IsAlive())
+		{
+			Tower->ApplyDamage(AttackDamage);
+		}
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		DrawDebugLine(World, GetActorLocation() + FVector(0.f, 0.f, 30.f),
+			Target->GetActorLocation() + FVector(0.f, 0.f, 40.f),
+			FColor::Yellow, false, 0.12f, 0, 2.5f);
+	}
 }
 
 // yaw toward move/combat dir, MeshYawOffset fixes import facing

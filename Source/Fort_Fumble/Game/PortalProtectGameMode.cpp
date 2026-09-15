@@ -228,6 +228,16 @@ int32 APortalProtectGameMode::GetTerrainSeed() const
 	return Terrain ? Terrain->GetSeed() : 0;
 }
 
+int32 APortalProtectGameMode::GetCurrentWave() const
+{
+	return Spawner ? Spawner->GetCurrentWave() : 0;
+}
+
+int32 APortalProtectGameMode::GetEnemiesRemainingInWave() const
+{
+	return Spawner ? Spawner->GetEnemiesRemaining() : 0;
+}
+
 // lose condition - stop spawns, show game over UI
 void APortalProtectGameMode::NotifyTowerDestroyed()
 {
