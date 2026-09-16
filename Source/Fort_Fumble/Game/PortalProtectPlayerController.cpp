@@ -6,6 +6,7 @@
 #include "Defender/DefenderPlacementSpot.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Button.h"
+#include "Components/TextBlock.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
@@ -18,6 +19,7 @@ APortalProtectPlayerController::APortalProtectPlayerController()
 
 	PauseMenuClassSoft = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/UI/Widgets/WBP_PauseMenu.WBP_PauseMenu_C")));
 	GameOverMenuClassSoft = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/UI/Widgets/WBP_GameOverMenu.WBP_GameOverMenu_C")));
+	VictoryMenuClassSoft = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/UI/Widgets/WBP_VictoryScreen.WBP_VictoryScreen_C")));
 
 	// default: Content/UI/Widgets/WBP_PauseMenu
 	static ConstructorHelpers::FClassFinder<UUserWidget> PauseMenuBP(
@@ -41,6 +43,18 @@ APortalProtectPlayerController::APortalProtectPlayerController()
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FClassFinder failed for game-over menu at /Game/UI/Widgets/WBP_GameOverMenu."));
+	}
+
+	// default: Content/UI/Widgets/WBP_VictoryScreen
+	static ConstructorHelpers::FClassFinder<UUserWidget> VictoryMenuBP(
+		TEXT("/Game/UI/Widgets/WBP_VictoryScreen"));
+	if (VictoryMenuBP.Succeeded())
+	{
+		VictoryMenuWidgetClass = VictoryMenuBP.Class;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FClassFinder failed for victory menu at /Game/UI/Widgets/WBP_VictoryScreen."));
 	}
 }
 
@@ -89,7 +103,7 @@ void APortalProtectPlayerController::SetupInputComponent()
 
 bool APortalProtectPlayerController::IsGameplayInputBlocked() const
 {
-	return bPauseMenuOpen || bGameOverMenuOpen || UGameplayStatics::IsGamePaused(this);
+	return bPauseMenuOpen || IsEndMatchMenuOpen() || UGameplayStatics::IsGamePaused(this);
 }
 
 void APortalProtectPlayerController::ApplyDefenderTypeSelection(EDefenderType Type)
@@ -250,6 +264,20 @@ UClass* APortalProtectPlayerController::ResolveGameOverMenuClass()
 	return TryLoadWidgetClass(TEXT("/Game/UI/Widgets/WBP_GameOverMenu.WBP_GameOverMenu_C"), TEXT("GameOverMenu"));
 }
 
+UClass* APortalProtectPlayerController::ResolveVictoryMenuClass()
+{
+	if (VictoryMenuWidgetClass)
+	{
+		return VictoryMenuWidgetClass.Get();
+	}
+	if (UClass* Loaded = VictoryMenuClassSoft.LoadSynchronous())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("VictoryMenu loaded via default soft class path: %s"), *VictoryMenuClassSoft.ToString());
+		return Loaded;
+	}
+	return TryLoadWidgetClass(TEXT("/Game/UI/Widgets/WBP_VictoryScreen.WBP_VictoryScreen_C"), TEXT("VictoryMenu"));
+}
+
 UClass* APortalProtectPlayerController::TryLoadWidgetClass(const TCHAR* ClassObjectPath, const TCHAR* DebugName) const
 {
 	if (UClass* LoadedViaClass = LoadClass<UUserWidget>(nullptr, ClassObjectPath))
@@ -275,7 +303,8 @@ UClass* APortalProtectPlayerController::TryLoadWidgetClass(const TCHAR* ClassObj
 
 void APortalProtectPlayerController::TogglePauseMenu()
 {
-	if (bGameOverMenuOpen)
+	// don't open pause over game-over or victory screens
+	if (IsEndMatchMenuOpen())
 	{
 		return;
 	}
@@ -304,6 +333,7 @@ void APortalProtectPlayerController::QuitToMainMenu()
 {
 	HidePauseMenu();
 	HideGameOverMenu();
+	HideVictoryMenu();
 	UGameplayStatics::OpenLevel(this, FName(TEXT("/Game/Scenes/MainMenu")));
 }
 
@@ -311,7 +341,39 @@ void APortalProtectPlayerController::RestartGame()
 {
 	HidePauseMenu();
 	HideGameOverMenu();
+	HideVictoryMenu();
 	UGameplayStatics::OpenLevel(this, FName(*GetWorld()->GetName()));
+}
+
+// wire retry / main-menu buttons (also accepts older Restart/Quit names)
+void APortalProtectPlayerController::BindEndMenuButtons(UUserWidget* MenuWidget)
+{
+	if (!MenuWidget)
+	{
+		return;
+	}
+
+	auto BindRestart = [this](UButton* Btn)
+	{
+		if (Btn)
+		{
+			Btn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::RestartGame);
+		}
+	};
+	auto BindQuit = [this](UButton* Btn)
+	{
+		if (Btn)
+		{
+			Btn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::QuitToMainMenu);
+		}
+	};
+
+	// current WBP names
+	BindRestart(Cast<UButton>(MenuWidget->GetWidgetFromName(TEXT("ButtonRetry"))));
+	BindQuit(Cast<UButton>(MenuWidget->GetWidgetFromName(TEXT("ButtonMainMenu"))));
+	// legacy aliases if someone renames back
+	BindRestart(Cast<UButton>(MenuWidget->GetWidgetFromName(TEXT("ButtonRestart"))));
+	BindQuit(Cast<UButton>(MenuWidget->GetWidgetFromName(TEXT("ButtonQuit"))));
 }
 
 // pause, show cursor, load pause widget, wire resume/quit if buttons exist
@@ -387,9 +449,9 @@ void APortalProtectPlayerController::HidePauseMenu()
 // same deal for game over screen
 void APortalProtectPlayerController::ShowGameOverMenu()
 {
-	if (bGameOverMenuOpen)
+	if (bGameOverMenuOpen || bVictoryMenuOpen)
 	{
-		return;
+		return; // don't stack lose UI on a win screen
 	}
 
 	if (bPauseMenuOpen)
@@ -413,16 +475,11 @@ void APortalProtectPlayerController::ShowGameOverMenu()
 			return;
 		}
 
-		// hook restart/quit if the widget has those button names
-		if (UButton* RestartBtn = Cast<UButton>(GameOverMenuWidget->GetWidgetFromName(TEXT("ButtonRestart"))))
-		{
-			RestartBtn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::RestartGame);
-		}
-		if (UButton* QuitBtn = Cast<UButton>(GameOverMenuWidget->GetWidgetFromName(TEXT("ButtonQuit"))))
-		{
-			QuitBtn->OnClicked.AddDynamic(this, &APortalProtectPlayerController::QuitToMainMenu);
-		}
+		BindEndMenuButtons(GameOverMenuWidget);
 	}
+
+	// final score from game mode - every time we show (widget may already exist)
+	UpdateGameOverScoreText();
 
 	GameOverMenuWidget->AddToViewport(110);
 	GameOverMenuWidget->SetVisibility(ESlateVisibility::Visible);
@@ -441,6 +498,123 @@ void APortalProtectPlayerController::ShowGameOverMenu()
 	bGameOverMenuOpen = true;
 }
 
+// victory screen - same pause/cursor flow as game over, different widget
+void APortalProtectPlayerController::ShowVictoryMenu()
+{
+	if (bVictoryMenuOpen || bGameOverMenuOpen)
+	{
+		return;
+	}
+
+	if (bPauseMenuOpen)
+	{
+		HidePauseMenu();
+	}
+
+	UClass* WidgetClass = ResolveVictoryMenuClass();
+	if (!WidgetClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Victory menu widget class missing (expected /Game/UI/Widgets/WBP_VictoryScreen)."));
+		return;
+	}
+
+	if (!VictoryMenuWidget)
+	{
+		VictoryMenuWidget = CreateWidget<UUserWidget>(this, WidgetClass);
+		if (!VictoryMenuWidget)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Failed to create WBP_VictoryScreen."));
+			return;
+		}
+
+		BindEndMenuButtons(VictoryMenuWidget);
+	}
+
+	UpdateVictoryScoreText();
+
+	VictoryMenuWidget->AddToViewport(110);
+	VictoryMenuWidget->SetVisibility(ESlateVisibility::Visible);
+
+	bShowMouseCursor = true;
+	bEnableClickEvents = true;
+	bEnableMouseOverEvents = true;
+
+	FInputModeGameAndUI Mode;
+	Mode.SetWidgetToFocus(VictoryMenuWidget->TakeWidget());
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	Mode.SetHideCursorDuringCapture(false);
+	SetInputMode(Mode);
+
+	SetPause(true);
+	bVictoryMenuOpen = true;
+}
+
+void APortalProtectPlayerController::UpdateGameOverScoreText()
+{
+	UpdateEndMenuScoreText(GameOverMenuWidget);
+}
+
+void APortalProtectPlayerController::UpdateVictoryScoreText()
+{
+	UpdateEndMenuScoreText(VictoryMenuWidget);
+}
+
+void APortalProtectPlayerController::UpdateEndMenuScoreText(UUserWidget* MenuWidget)
+{
+	if (!MenuWidget)
+	{
+		return;
+	}
+
+	APortalProtectGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APortalProtectGameMode>() : nullptr;
+	if (!GM)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UpdateEndMenuScoreText: no PortalProtectGameMode."));
+		return;
+	}
+
+	const int32 FinalScore = GM->GetScore();
+	const FText ScoreLabel = FText::FromString(FString::Printf(TEXT("Score: %d"), FinalScore));
+
+	// configured name first, then common designer aliases
+	TArray<FName> Candidates;
+	Candidates.Add(ScoreTextWidgetName);
+	static const TCHAR* Fallbacks[] = {
+		TEXT("TextScore"),
+		TEXT("ScoreText"),
+		TEXT("PointsText"),
+		TEXT("Text_Points"),
+		TEXT("TextPoints"),
+		TEXT("Text_Score"),
+		TEXT("Score"),
+		TEXT("Points")
+	};
+	for (const TCHAR* Name : Fallbacks)
+	{
+		Candidates.AddUnique(FName(Name));
+	}
+
+	for (const FName& Candidate : Candidates)
+	{
+		if (Candidate.IsNone())
+		{
+			continue;
+		}
+		if (UTextBlock* ScoreText = Cast<UTextBlock>(MenuWidget->GetWidgetFromName(Candidate)))
+		{
+			ScoreText->SetText(ScoreLabel);
+			UE_LOG(LogTemp, Log, TEXT("End-menu score set on TextBlock '%s' -> %d"), *Candidate.ToString(), FinalScore);
+			return;
+		}
+	}
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("End-menu score TextBlock not found (wanted '%s'). Rename the score text to TextScore, or set ScoreTextWidgetName on PortalProtectPlayerController."),
+		*ScoreTextWidgetName.ToString());
+}
+
 void APortalProtectPlayerController::HideGameOverMenu()
 {
 	if (GameOverMenuWidget)
@@ -457,4 +631,22 @@ void APortalProtectPlayerController::HideGameOverMenu()
 
 	SetPause(false);
 	bGameOverMenuOpen = false;
+}
+
+void APortalProtectPlayerController::HideVictoryMenu()
+{
+	if (VictoryMenuWidget)
+	{
+		VictoryMenuWidget->RemoveFromParent();
+	}
+
+	bShowMouseCursor = false;
+	bEnableClickEvents = false;
+	bEnableMouseOverEvents = false;
+
+	FInputModeGameOnly Mode;
+	SetInputMode(Mode);
+
+	SetPause(false);
+	bVictoryMenuOpen = false;
 }

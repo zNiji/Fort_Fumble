@@ -378,7 +378,7 @@ void APortalProtectGameMode::NotifyTowerDestroyed()
 	}
 }
 
-// win condition - all MaxWaves cleared, freeze match + flash You Win!
+// win condition - all MaxWaves cleared, freeze match + show victory UMG
 void APortalProtectGameMode::NotifyAllWavesCleared()
 {
 	if (bGameOver || bVictory)
@@ -394,10 +394,28 @@ void APortalProtectGameMode::NotifyAllWavesCleared()
 		Spawner->SetSpawningEnabled(false);
 	}
 
-	WaveBannerText = TEXT("You Win!");
-	WaveBannerTimeRemaining = 9999.f; // stay up until restart
-	SetStatusMessage(TEXT("You cleared all 10 waves! Press R to restart."), 8.f);
+	// clear temporary wave banner - victory widget is the primary win UX
+	WaveBannerText.Empty();
+	WaveBannerTimeRemaining = 0.f;
+	ClearStatusMessage();
 	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Victory - all waves cleared."));
+
+	if (UWorld* World = GetWorld())
+	{
+		APlayerController* FirstPC = World->GetFirstPlayerController();
+		if (APortalProtectPlayerController* PC = Cast<APortalProtectPlayerController>(FirstPC))
+		{
+			PC->ShowVictoryMenu();
+		}
+		else
+		{
+			UE_LOG(
+				LogTemp,
+				Error,
+				TEXT("NotifyAllWavesCleared: expected PortalProtectPlayerController but got %s. Check GameMode/PlayerController project settings."),
+				FirstPC ? *FirstPC->GetClass()->GetName() : TEXT("null"));
+		}
+	}
 }
 
 // pad stays; give the place slot back so you can rebuild after a wipe

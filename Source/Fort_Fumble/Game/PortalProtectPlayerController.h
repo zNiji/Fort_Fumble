@@ -33,6 +33,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|GameOver")
 	TSubclassOf<UUserWidget> GameOverMenuWidgetClass;
 
+	// victory widget - defaults to WBP_VictoryScreen
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|Victory")
+	TSubclassOf<UUserWidget> VictoryMenuWidgetClass;
+
+	// UMG TextBlock name on end-of-match menus for final score (Is Variable / rename in designer)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|Score")
+	FName ScoreTextWidgetName = TEXT("TextScore");
+
 	// escape or P - safe to call from blueprint
 	UFUNCTION(BlueprintCallable, Category = "Pause")
 	void TogglePauseMenu();
@@ -49,7 +57,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Pause")
 	void QuitToMainMenu();
 
-	// reload this level - hook restart on game over screen
+	// reload this level - hook restart on game over / victory screens
 	UFUNCTION(BlueprintCallable, Category = "GameOver")
 	void RestartGame();
 
@@ -57,16 +65,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "GameOver")
 	void ShowGameOverMenu();
 
+	// game mode calls this when all waves are cleared
+	UFUNCTION(BlueprintCallable, Category = "Victory")
+	void ShowVictoryMenu();
+
 	UFUNCTION(BlueprintPure, Category = "Pause")
 	bool IsPauseMenuOpen() const { return bPauseMenuOpen; }
 
 	UFUNCTION(BlueprintPure, Category = "GameOver")
 	bool IsGameOverMenuOpen() const { return bGameOverMenuOpen; }
 
+	UFUNCTION(BlueprintPure, Category = "Victory")
+	bool IsVictoryMenuOpen() const { return bVictoryMenuOpen; }
+
 protected:
 	void OnLeftClick();
 	void OnRestart();
 	bool IsGameplayInputBlocked() const;
+	bool IsEndMatchMenuOpen() const { return bGameOverMenuOpen || bVictoryMenuOpen; }
 	void ApplyDefenderTypeSelection(EDefenderType Type);
 	void SelectDefenderCannon();
 	void SelectDefenderMarksman();
@@ -79,8 +95,16 @@ protected:
 	void HidePauseMenu();
 	UClass* ResolvePauseMenuClass();
 	UClass* ResolveGameOverMenuClass();
+	UClass* ResolveVictoryMenuClass();
 	void HideGameOverMenu();
+	void HideVictoryMenu();
+	// push GM->GetScore() into an end-menu TextBlock (ScoreTextWidgetName + common aliases)
+	void UpdateEndMenuScoreText(UUserWidget* MenuWidget);
+	void UpdateGameOverScoreText();
+	void UpdateVictoryScoreText();
 	UClass* TryLoadWidgetClass(const TCHAR* ClassObjectPath, const TCHAR* DebugName) const;
+	// bind retry/main-menu (and legacy restart/quit) buttons if present
+	void BindEndMenuButtons(UUserWidget* MenuWidget);
 
 	UPROPERTY()
 	TObjectPtr<ADefenderPlacementSpot> HoveredSpot;
@@ -92,11 +116,18 @@ protected:
 	TObjectPtr<UUserWidget> GameOverMenuWidget;
 
 	UPROPERTY()
+	TObjectPtr<UUserWidget> VictoryMenuWidget;
+
+	UPROPERTY()
 	TSoftClassPtr<UUserWidget> PauseMenuClassSoft;
 
 	UPROPERTY()
 	TSoftClassPtr<UUserWidget> GameOverMenuClassSoft;
 
+	UPROPERTY()
+	TSoftClassPtr<UUserWidget> VictoryMenuClassSoft;
+
 	bool bPauseMenuOpen = false;
 	bool bGameOverMenuOpen = false;
+	bool bVictoryMenuOpen = false;
 };
