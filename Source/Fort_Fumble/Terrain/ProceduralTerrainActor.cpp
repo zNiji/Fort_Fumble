@@ -652,17 +652,17 @@ void AProceduralTerrainActor::CarvePaths()
 void AProceduralTerrainActor::BuildDefenderSlots()
 {
 	FRandomStream Stream(Seed ^ 0x5C5C5C5C);
-	constexpr int32 MinPadsPerPath = 3;
+	constexpr int32 MinPadsPerPath = 4; // one more pad per path than the old 3-band layout
 	const int32 DesiredSlots = FMath::Max(MinPadsPerPath * Paths.Num(), MinPadsPerPath * 3);
-	const int32 MinDistCells = 4;
+	const int32 MinDistCells = 3; // slightly closer so 4 pads can fit along a path
 	const float MinDistWorld = MinDistCells * CellSize;
 	const float MinDistWorldSq = MinDistWorld * MinDistWorld;
 	// ADefenderPlacementSpot uses engine cylinder, origin at center, half-height 50 * z scale 0.15
 	const float PadHalfHeight = 50.f * 0.15f;
 
-	// three pads per path spread along early-mid / mid / late sections
-	const float BandMin[MinPadsPerPath] = { 0.34f, 0.50f, 0.66f };
-	const float BandMax[MinPadsPerPath] = { 0.50f, 0.66f, 0.86f };
+	// four pads per path spread along progress (early-mid → late)
+	const float BandMin[MinPadsPerPath] = { 0.32f, 0.46f, 0.60f, 0.74f };
+	const float BandMax[MinPadsPerPath] = { 0.46f, 0.60f, 0.74f, 0.88f };
 
 	struct FPadCandidate
 	{

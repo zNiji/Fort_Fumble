@@ -10,6 +10,7 @@
 class USceneComponent;
 class UStaticMeshComponent;
 class AEnemyUnit;
+class ADefenderPlacementSpot;
 
 UCLASS()
 class FORT_FUMBLE_API ADefenderUnit : public AActor
@@ -20,10 +21,15 @@ public:
 	ADefenderUnit();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Defender")
 	void InitializeAsType(EDefenderType InType);
+
+	// remember which pad we sit on so death can free it for reuse
+	UFUNCTION(BlueprintCallable, Category = "Defender")
+	void SetOwningSpot(ADefenderPlacementSpot* Spot);
 
 	UFUNCTION(BlueprintCallable, Category = "Defender")
 	void ApplyDamage(float Amount);
@@ -94,6 +100,8 @@ private:
 	void ApplyStylizedTurretMaterials(const TCHAR* MatPath, const TCHAR* TexPath);
 	void ApplyMeshTint(const FLinearColor& Tint);
 	void RefreshColor();
+	// pad stays; clear occupied + refund place budget
+	void ReleasePlacementOnDeath();
 
 	float Health = 90.f;
 	float AttackTimer = 0.f;
@@ -101,5 +109,8 @@ private:
 	float PivotToGroundOffset = 40.f;
 	bool bUsingCannonMesh = false;
 	bool bTypeConfigured = false;
+	bool bReleasedPlacement = false; // avoid double-refund if EndPlay fires twice
 	FVector FallbackScaleMul = FVector(1.f);
+
+	TWeakObjectPtr<ADefenderPlacementSpot> OwningSpot;
 };

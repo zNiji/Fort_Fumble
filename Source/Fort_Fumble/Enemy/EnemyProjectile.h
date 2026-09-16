@@ -55,7 +55,7 @@ private:
 	TWeakObjectPtr<AActor> InstigatorActor;
 
 	FVector Velocity = FVector::ZeroVector;
-	float Damage = 16.f;
+	float Damage = 10.f;
 	float Speed = 900.f;
 	float Age = 0.f;
 	bool bConsumed = false;

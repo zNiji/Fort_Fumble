@@ -95,7 +95,7 @@ void APortalProtectGameMode::SpawnWorld()
 		}
 	}
 
-	// make sure budget covers all the pads (at least 3 per path)
+	// make sure budget covers all the pads (at least 4 per path)
 	DefendersRemaining = FMath::Max(StartingDefenders, PlacementSpots.Num());
 }
 
@@ -255,6 +255,7 @@ bool APortalProtectGameMode::TryPlaceDefenderAtSpot(ADefenderPlacementSpot* Spot
 	const FVector FinalLoc = Surface + FVector(0.f, 0.f, Defender->GetPivotToGroundOffset());
 	Defender->FinishSpawning(FTransform(FRotator::ZeroRotator, FinalLoc));
 
+	Defender->SetOwningSpot(Spot); // so death frees this pad (does not destroy it)
 	Spot->SetOccupied(true);
 	--DefendersRemaining;
 	CoinBalance -= Cost;
@@ -344,4 +345,14 @@ void APortalProtectGameMode::NotifyTowerDestroyed()
 				FirstPC ? *FirstPC->GetClass()->GetName() : TEXT("null"));
 		}
 	}
+}
+
+// pad stays; give the place slot back so you can rebuild after a wipe
+void APortalProtectGameMode::NotifyDefenderDestroyed()
+{
+	if (bGameOver)
+	{
+		return;
+	}
+	++DefendersRemaining;
 }

@@ -1,7 +1,9 @@
 // defender units - cannon / marksman / mortar, aim + auto fire
 
 #include "Defender/DefenderUnit.h"
+#include "Defender/DefenderPlacementSpot.h"
 #include "Enemy/EnemyUnit.h"
+#include "Game/PortalProtectGameMode.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
@@ -47,6 +49,21 @@ void ADefenderUnit::BeginPlay()
 	}
 	Health = MaxHealth;
 	RefreshColor();
+}
+
+void ADefenderUnit::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// level teardown also hits EndPlay — only free pad when this unit actually dies
+	if (EndPlayReason == EEndPlayReason::Destroyed)
+	{
+		ReleasePlacementOnDeath();
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void ADefenderUnit::SetOwningSpot(ADefenderPlacementSpot* Spot)
+{
+	OwningSpot = Spot;
 }
 
 void ADefenderUnit::InitializeAsType(EDefenderType InType)
@@ -351,7 +368,32 @@ void ADefenderUnit::ApplyDamage(float Amount)
 	RefreshColor();
 	if (Health <= 0.f)
 	{
+		// free pad + refund place budget before actor goes away (pad actor stays)
+		ReleasePlacementOnDeath();
 		Destroy();
+	}
+}
+
+void ADefenderUnit::ReleasePlacementOnDeath()
+{
+	if (bReleasedPlacement)
+	{
+		return;
+	}
+	bReleasedPlacement = true;
+
+	if (ADefenderPlacementSpot* Spot = OwningSpot.Get())
+	{
+		Spot->SetOccupied(false); // pad stays in world, ready for LMB place again
+		OwningSpot.Reset();
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (APortalProtectGameMode* GM = World->GetAuthGameMode<APortalProtectGameMode>())
+		{
+			GM->NotifyDefenderDestroyed();
+		}
 	}
 }
 

@@ -61,7 +61,7 @@ public:
 	float MoveSpeed = 220.f;
 
 	UPROPERTY(EditAnywhere, Category = "Enemy|Combat")
-	float AttackDamage = 17.f;
+	float AttackDamage = 11.f;
 
 	// fire range in 2D - tuned for cell size 110 pads beside paths
 	UPROPERTY(EditAnywhere, Category = "Enemy|Combat")

@@ -49,11 +49,11 @@ public:
 
 	// seconds between fully clearing a wave and starting the next
 	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
-	float RestDuration = 6.5f;
+	float RestDuration = 8.5f;
 
 	// gap between individual spawns inside a wave
 	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
-	float SpawnInterval = 1.35f;
+	float SpawnInterval = 2.35f;
 
 	// safety: if a stuck enemy blocks forever, force next wave after this
 	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")

@@ -109,7 +109,7 @@ void AEnemyUnit::InitializeAsType(EEnemyType InType)
 			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Cactus/Cactus_RunFWD_ANIM.Cactus_RunFWD_ANIM"));
 		MaxHealth = 38.f;
 		MoveSpeed = 390.f;
-		AttackDamage = 11.f;
+		AttackDamage = 7.f;
 		AttackRange = 140.f;
 		AttackCooldown = 0.65f;
 		DefenderAggroRange = 220.f;
@@ -134,7 +134,7 @@ void AEnemyUnit::InitializeAsType(EEnemyType InType)
 			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/ChestMonster/ChestMonster_WalkFWD_ANIM.ChestMonster_WalkFWD_ANIM"));
 		MaxHealth = 220.f;
 		MoveSpeed = 115.f;
-		AttackDamage = 34.f;
+		AttackDamage = 20.f;
 		AttackRange = 820.f;
 		AttackCooldown = 1.55f;
 		DefenderAggroRange = 820.f;
@@ -159,7 +159,7 @@ void AEnemyUnit::InitializeAsType(EEnemyType InType)
 			TEXT("/Game/MonsterForSurvivalGame/Animation/PBR/Slime/Slime_Walk_ANIM.Slime_Walk_ANIM"));
 		MaxHealth = 70.f;
 		MoveSpeed = 220.f;
-		AttackDamage = 17.f;
+		AttackDamage = 11.f;
 		AttackRange = 750.f;
 		AttackCooldown = 1.05f;
 		DefenderAggroRange = 750.f;

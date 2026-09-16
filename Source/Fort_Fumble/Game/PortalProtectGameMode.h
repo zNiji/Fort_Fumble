@@ -144,6 +144,10 @@ public:
 
 	void NotifyTowerDestroyed();
 
+	// defender died — refund one place so pads can be filled again
+	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
+	void NotifyDefenderDestroyed();
+
 
 
 	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
@@ -152,11 +156,11 @@ public:
 
 
 
-	// how many cannons you can still place - terrain spawns at least 3 pads per path
+	// how many cannons you can still place - terrain aims for 4 pads per path
 
 	UPROPERTY(EditAnywhere, Category = "PortalProtect")
 
-	int32 StartingDefenders = 12;
+	int32 StartingDefenders = 16;
 
 
 
@@ -250,7 +254,7 @@ protected:
 
 	int32 PlayerPlaceAttempts = 0;
 
-	int32 DefendersRemaining = 12;
+	int32 DefendersRemaining = 16;
 
 	int32 CoinBalance = 25;
 

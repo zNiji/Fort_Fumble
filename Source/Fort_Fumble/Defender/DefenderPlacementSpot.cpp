@@ -41,6 +41,11 @@ void ADefenderPlacementSpot::SetOccupied(bool bInOccupied)
 {
 	bOccupied = bInOccupied;
 	MarkerMesh->SetVisibility(!bOccupied);
+	// pad survives the defender — show yellow again when freed so LMB place works
+	if (!bOccupied)
+	{
+		ApplyColor(FLinearColor(0.95f, 0.85f, 0.2f, 1.f));
+	}
 }
 
 void ADefenderPlacementSpot::SetHighlighted(bool bHighlight)

@@ -127,7 +127,16 @@ void AEnemySpawner::BuildWaveComposition(int32 WaveNumber)
 
 	// base count grows with wave, seed keeps mixes repeatable per wave index
 	FRandomStream Rng(WaveNumber * 9176 + 42);
-	const int32 Count = FMath::Clamp(3 + WaveNumber * 2 + Rng.RandRange(0, 1), 3, 28);
+	// early waves stay lean so wave 2 isn't a meat grinder
+	int32 Count;
+	if (WaveNumber <= 3)
+	{
+		Count = FMath::Clamp(2 + WaveNumber + Rng.RandRange(0, 1), 3, 7);
+	}
+	else
+	{
+		Count = FMath::Clamp(3 + WaveNumber * 2 + Rng.RandRange(0, 1), 3, 28);
+	}
 
 	for (int32 i = 0; i < Count; ++i)
 	{
