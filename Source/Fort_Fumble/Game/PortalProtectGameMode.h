@@ -45,6 +45,8 @@ public:
 
 	virtual void BeginPlay() override;
 
+	virtual void Tick(float DeltaSeconds) override;
+
 
 
 	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
@@ -56,6 +58,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PortalProtect")
 
 	bool IsGameOver() const { return bGameOver; }
+
+	UFUNCTION(BlueprintPure, Category = "PortalProtect")
+	bool IsVictory() const { return bVictory; }
 
 
 
@@ -120,6 +125,26 @@ public:
 
 	FString GetStatusMessage() const { return StatusMessage; }
 
+	// big centered "Wave N" flash - HUD reads these each frame
+	UPROPERTY(VisibleAnywhere, Category = "PortalProtect|Waves")
+	FString WaveBannerText;
+
+	UPROPERTY(VisibleAnywhere, Category = "PortalProtect|Waves")
+	float WaveBannerTimeRemaining = 0.f;
+
+	// how long the wave banner stays up (~2.5–3.5s feels right)
+	UPROPERTY(EditAnywhere, Category = "PortalProtect|Waves")
+	float WaveBannerDuration = 3.0f;
+
+	UFUNCTION(BlueprintCallable, Category = "PortalProtect|Waves")
+	void ShowWaveBanner(int32 WaveNum);
+
+	UFUNCTION(BlueprintPure, Category = "PortalProtect|Waves")
+	FString GetWaveBannerText() const { return WaveBannerText; }
+
+	UFUNCTION(BlueprintPure, Category = "PortalProtect|Waves")
+	float GetWaveBannerTimeRemaining() const { return WaveBannerTimeRemaining; }
+
 
 
 	UFUNCTION(BlueprintPure, Category = "PortalProtect")
@@ -143,6 +168,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
 
 	void NotifyTowerDestroyed();
+
+	// spawner calls this after wave 10 is fully cleared
+	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
+	void NotifyAllWavesCleared();
 
 	// defender died — refund one place so pads can be filled again
 	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
@@ -259,6 +288,8 @@ protected:
 	int32 CoinBalance = 25;
 
 	bool bGameOver = false;
+
+	bool bVictory = false;
 
 	FString StatusMessage;
 

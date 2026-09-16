@@ -22,14 +22,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Coins")
 	void Configure(AProceduralTerrainActor* InTerrain);
 
+	// a few more on the board at match start
 	UPROPERTY(EditAnywhere, Category = "Coins")
-	int32 InitialCoinCount = 16;
+	int32 InitialCoinCount = 18;
 
+	// hard cap — bump a bit so the faster respawn has room to breathe
 	UPROPERTY(EditAnywhere, Category = "Coins")
-	int32 MaxActiveCoins = 22;
+	int32 MaxActiveCoins = 26;
 
+	// was 3.5s — snappier top-ups so the map doesn't feel empty
 	UPROPERTY(EditAnywhere, Category = "Coins")
-	float RespawnInterval = 3.5f;
+	float RespawnInterval = 2.1f;
 
 	UPROPERTY(EditAnywhere, Category = "Coins")
 	TSubclassOf<ACoinPickup> CoinClass;

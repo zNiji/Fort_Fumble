@@ -47,6 +47,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Spawner")
 	EWavePhase GetWavePhase() const { return WavePhase; }
 
+	UFUNCTION(BlueprintPure, Category = "Spawner|Waves")
+	int32 GetMaxWaves() const { return MaxWaves; }
+
+	// hard cap - clearing this wave ends the match (no endless mode)
+	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
+	int32 MaxWaves = 10;
+
 	// seconds between fully clearing a wave and starting the next
 	UPROPERTY(EditAnywhere, Category = "Spawner|Waves")
 	float RestDuration = 8.5f;
@@ -83,4 +90,5 @@ private:
 	float PhaseTimer = 2.0f;
 	float ClearWaitTimer = 0.f;
 	bool bSpawningEnabled = true;
+	bool bVictoryNotified = false;
 };

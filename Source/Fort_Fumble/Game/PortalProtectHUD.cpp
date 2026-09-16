@@ -105,4 +105,35 @@ void APortalProtectHUD::DrawHUD()
 	{
 		DrawText(Status, FLinearColor(1.f, 0.75f, 0.35f), 40.f, 266.f, BodyFont, 1.15f);
 	}
+
+	// centered wave / win banner (GameMode owns the timer)
+	const FString Banner = GM->GetWaveBannerText();
+	const float BannerTime = GM->GetWaveBannerTimeRemaining();
+	if (!Banner.IsEmpty() && BannerTime > 0.f)
+	{
+		UFont* BannerFont = CrispScoreFont ? CrispScoreFont : BodyFont;
+		const float BannerScale = 2.4f;
+
+		// fade out in the last ~0.75s (skip fade for permanent win banner)
+		float Alpha = 1.f;
+		if (!GM->IsVictory() && BannerTime < 0.75f)
+		{
+			Alpha = FMath::Clamp(BannerTime / 0.75f, 0.f, 1.f);
+		}
+
+		float TextW = 0.f;
+		float TextH = 0.f;
+		GetTextSize(Banner, TextW, TextH, BannerFont, BannerScale);
+
+		const float DrawX = (Canvas->SizeX - TextW) * 0.5f;
+		const float DrawY = Canvas->SizeY * 0.28f;
+
+		const FLinearColor Shadow(0.f, 0.f, 0.f, Alpha);
+		const FLinearColor Fill = GM->IsVictory()
+			? FLinearColor(0.35f, 1.f, 0.45f, Alpha)
+			: FLinearColor(1.f, 0.92f, 0.35f, Alpha);
+
+		DrawText(Banner, Shadow, DrawX + 3.f, DrawY + 3.f, BannerFont, BannerScale);
+		DrawText(Banner, Fill, DrawX, DrawY, BannerFont, BannerScale);
+	}
 }

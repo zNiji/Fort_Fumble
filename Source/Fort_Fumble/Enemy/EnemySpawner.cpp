@@ -2,6 +2,7 @@
 
 #include "Enemy/EnemySpawner.h"
 #include "Enemy/EnemyUnit.h"
+#include "Game/PortalProtectGameMode.h"
 #include "Terrain/ProceduralTerrainActor.h"
 #include "Engine/World.h"
 
@@ -65,6 +66,12 @@ void AEnemySpawner::Tick(float DeltaTime)
 		PhaseTimer -= DeltaTime;
 		if (PhaseTimer <= 0.f)
 		{
+			// don't start past the last wave
+			if (CurrentWave >= MaxWaves)
+			{
+				bSpawningEnabled = false;
+				return;
+			}
 			BeginWave(CurrentWave + 1);
 		}
 		break;
@@ -93,12 +100,28 @@ void AEnemySpawner::Tick(float DeltaTime)
 		const int32 Alive = GetEnemiesRemaining();
 		if (Alive <= 0 || ClearWaitTimer >= MaxClearWait)
 		{
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Wave %d cleared"), CurrentWave);
+
+			// last wave done = victory, no more rests / waves
+			if (CurrentWave >= MaxWaves)
+			{
+				bSpawningEnabled = false;
+				if (!bVictoryNotified)
+				{
+					bVictoryNotified = true;
+					if (APortalProtectGameMode* GM = GetWorld()->GetAuthGameMode<APortalProtectGameMode>())
+					{
+						GM->NotifyAllWavesCleared();
+					}
+				}
+				return;
+			}
+
 			WavePhase = EWavePhase::Resting;
 			// later waves get a tiny bit less rest so pressure creeps up
 			const float Scale = FMath::Clamp(1.f - (CurrentWave - 1) * 0.04f, 0.7f, 1.f);
 			PhaseTimer = RestDuration * Scale;
-			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Wave %d cleared - resting %.1fs"),
-				CurrentWave, PhaseTimer);
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Resting %.1fs before next wave"), PhaseTimer);
 		}
 		break;
 	}
@@ -109,13 +132,19 @@ void AEnemySpawner::Tick(float DeltaTime)
 
 void AEnemySpawner::BeginWave(int32 WaveNumber)
 {
-	CurrentWave = FMath::Max(1, WaveNumber);
+	CurrentWave = FMath::Clamp(WaveNumber, 1, MaxWaves);
 	BuildWaveComposition(CurrentWave);
 	EnemiesLeftToSpawn = SpawnQueue.Num();
 	AliveThisWave.Reset();
 	WavePhase = EWavePhase::Spawning;
 	PhaseTimer = 0.25f;
 	ClearWaitTimer = 0.f;
+
+	// tell HUD to flash "Wave N" in the middle of the screen
+	if (APortalProtectGameMode* GM = GetWorld()->GetAuthGameMode<APortalProtectGameMode>())
+	{
+		GM->ShowWaveBanner(CurrentWave);
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Starting wave %d with %d enemies"),
 		CurrentWave, EnemiesLeftToSpawn);

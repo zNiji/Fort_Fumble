@@ -17,6 +17,7 @@
 
 APortalProtectGameMode::APortalProtectGameMode()
 {
+	PrimaryActorTick.bCanEverTick = true;
 	DefaultPawnClass = APortalProtectPawn::StaticClass();
 	PlayerControllerClass = APortalProtectPlayerController::StaticClass();
 	HUDClass = APortalProtectHUD::StaticClass();
@@ -31,6 +32,9 @@ void APortalProtectGameMode::BeginPlay()
 	CoinBalance = StartingCoins;
 	Score = 0;
 	bGameOver = false;
+	bVictory = false;
+	WaveBannerText.Empty();
+	WaveBannerTimeRemaining = 0.f;
 	StatusMessage.Empty();
 	PlayerPlaceAttempts = 0;
 	SelectedDefenderType = EDefenderType::Cannon;
@@ -40,6 +44,22 @@ void APortalProtectGameMode::BeginPlay()
 	GetWorldTimerManager().SetTimer(PlayerPlaceTimer, this, &APortalProtectGameMode::PlacePlayerOnTerrain, 0.05f, true);
 	// survival points while the portal is still standing
 	GetWorldTimerManager().SetTimer(SurvivalScoreTimer, this, &APortalProtectGameMode::TickSurvivalScore, 1.0f, true);
+}
+
+void APortalProtectGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// countdown the centered wave banner until it clears (win banner stays forever)
+	if (!bVictory && WaveBannerTimeRemaining > 0.f)
+	{
+		WaveBannerTimeRemaining -= DeltaSeconds;
+		if (WaveBannerTimeRemaining <= 0.f)
+		{
+			WaveBannerTimeRemaining = 0.f;
+			WaveBannerText.Empty();
+		}
+	}
 }
 
 // spawn terrain, tower, spawners, pads - wire everything to generated terrain data
@@ -304,6 +324,12 @@ void APortalProtectGameMode::ClearStatusMessage()
 	StatusMessage.Empty();
 }
 
+void APortalProtectGameMode::ShowWaveBanner(int32 WaveNum)
+{
+	WaveBannerText = FString::Printf(TEXT("Wave %d"), WaveNum);
+	WaveBannerTimeRemaining = WaveBannerDuration;
+}
+
 int32 APortalProtectGameMode::GetTerrainSeed() const
 {
 	return Terrain ? Terrain->GetSeed() : 0;
@@ -322,6 +348,11 @@ int32 APortalProtectGameMode::GetEnemiesRemainingInWave() const
 // lose condition - stop spawns, show game over UI
 void APortalProtectGameMode::NotifyTowerDestroyed()
 {
+	if (bVictory)
+	{
+		return; // already won - don't flip to a lose screen
+	}
+
 	bGameOver = true;
 	GetWorldTimerManager().ClearTimer(SurvivalScoreTimer);
 	if (Spawner)
@@ -345,6 +376,28 @@ void APortalProtectGameMode::NotifyTowerDestroyed()
 				FirstPC ? *FirstPC->GetClass()->GetName() : TEXT("null"));
 		}
 	}
+}
+
+// win condition - all MaxWaves cleared, freeze match + flash You Win!
+void APortalProtectGameMode::NotifyAllWavesCleared()
+{
+	if (bGameOver || bVictory)
+	{
+		return;
+	}
+
+	bVictory = true;
+	bGameOver = true; // freeze placement / score drip like a normal end state
+	GetWorldTimerManager().ClearTimer(SurvivalScoreTimer);
+	if (Spawner)
+	{
+		Spawner->SetSpawningEnabled(false);
+	}
+
+	WaveBannerText = TEXT("You Win!");
+	WaveBannerTimeRemaining = 9999.f; // stay up until restart
+	SetStatusMessage(TEXT("You cleared all 10 waves! Press R to restart."), 8.f);
+	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Victory - all waves cleared."));
 }
 
 // pad stays; give the place slot back so you can rebuild after a wipe
