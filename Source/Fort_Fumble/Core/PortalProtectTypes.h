@@ -13,6 +13,15 @@ enum class EEnemyType : uint8
 	Tank UMETA(DisplayName = "Tank")
 };
 
+// cannon = balanced, marksman = long range burst, mortar = splash groups
+UENUM(BlueprintType)
+enum class EDefenderType : uint8
+{
+	Cannon UMETA(DisplayName = "Cannon"),
+	Marksman UMETA(DisplayName = "Marksman"),
+	Mortar UMETA(DisplayName = "Mortar")
+};
+
 // one enemy route - waypoints from map edge to the tower
 USTRUCT(BlueprintType)
 struct FPortalPath

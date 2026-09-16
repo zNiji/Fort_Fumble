@@ -277,7 +277,7 @@ void AEnemyUnit::Tick(float DeltaTime)
 
 void AEnemyUnit::ApplyDamage(float Amount)
 {
-	if (!IsAlive())
+	if (!IsValid(this) || IsActorBeingDestroyed() || !IsAlive() || Amount <= 0.f)
 	{
 		return;
 	}
@@ -287,7 +287,7 @@ void AEnemyUnit::ApplyDamage(float Amount)
 	UpdateHealthBar();
 	if (Health <= 0.f)
 	{
-		if (HealthBar)
+		if (IsValid(HealthBar))
 		{
 			HealthBar->SetVisibility(false);
 			if (UEnemyHealthBarWidget* Bar = Cast<UEnemyHealthBarWidget>(HealthBar->GetUserWidgetObject()))
@@ -392,14 +392,22 @@ bool AEnemyUnit::TryAttackEnemyTargets(float DeltaTime)
 	const float EffectiveTowerRange = bAtPathEnd ? FMath::Max(AttackRange, TowerAttackRange) : AttackRange;
 
 	float DefenderDistSq = TNumericLimits<float>::Max();
-	if (Defender)
+	if (IsValid(Defender) && !Defender->IsActorBeingDestroyed() && Defender->IsAlive())
 	{
 		DefenderDistSq = FVector::DistSquared2D(Origin, Defender->GetActorLocation());
+	}
+	else
+	{
+		Defender = nullptr;
 	}
 	const bool bDefenderInFireRange = Defender && DefenderDistSq <= AttackRange * AttackRange;
 
 	float TowerDistSq = TNumericLimits<float>::Max();
-	const bool bTowerAlive = Tower && Tower->IsAlive();
+	const bool bTowerAlive = IsValid(Tower) && !Tower->IsActorBeingDestroyed() && Tower->IsAlive();
+	if (!bTowerAlive)
+	{
+		Tower = nullptr;
+	}
 	if (bTowerAlive)
 	{
 		TowerDistSq = FVector::DistSquared2D(Origin, Tower->GetActorLocation());
@@ -463,7 +471,7 @@ bool AEnemyUnit::TryAttackEnemyTargets(float DeltaTime)
 
 void AEnemyUnit::FireProjectileAt(AActor* Target)
 {
-	if (!Target || !GetWorld())
+	if (!IsValid(Target) || Target->IsActorBeingDestroyed() || !GetWorld())
 	{
 		return;
 	}
@@ -476,7 +484,7 @@ void AEnemyUnit::FireProjectileAt(AActor* Target)
 
 	AEnemyProjectile* Shot = GetWorld()->SpawnActor<AEnemyProjectile>(
 		AEnemyProjectile::StaticClass(), Muzzle, GetActorRotation(), Params);
-	if (Shot)
+	if (IsValid(Shot))
 	{
 		Shot->InitProjectile(Target, AttackDamage, ProjectileSpeed, this);
 	}
@@ -488,21 +496,21 @@ void AEnemyUnit::FireProjectileAt(AActor* Target)
 
 void AEnemyUnit::MeleeHit(AActor* Target)
 {
-	if (!Target)
+	if (!IsValid(Target) || Target->IsActorBeingDestroyed())
 	{
 		return;
 	}
 
 	if (ADefenderUnit* Defender = Cast<ADefenderUnit>(Target))
 	{
-		if (Defender->IsAlive())
+		if (IsValid(Defender) && Defender->IsAlive())
 		{
 			Defender->ApplyDamage(AttackDamage);
 		}
 	}
 	else if (ACentralTower* Tower = Cast<ACentralTower>(Target))
 	{
-		if (Tower->IsAlive())
+		if (IsValid(Tower) && Tower->IsAlive())
 		{
 			Tower->ApplyDamage(AttackDamage);
 		}
@@ -510,9 +518,12 @@ void AEnemyUnit::MeleeHit(AActor* Target)
 
 	if (UWorld* World = GetWorld())
 	{
-		DrawDebugLine(World, GetActorLocation() + FVector(0.f, 0.f, 30.f),
-			Target->GetActorLocation() + FVector(0.f, 0.f, 40.f),
-			FColor::Yellow, false, 0.12f, 0, 2.5f);
+		if (IsValid(Target))
+		{
+			DrawDebugLine(World, GetActorLocation() + FVector(0.f, 0.f, 30.f),
+				Target->GetActorLocation() + FVector(0.f, 0.f, 40.f),
+				FColor::Yellow, false, 0.12f, 0, 2.5f);
+		}
 	}
 }
 
@@ -534,6 +545,11 @@ void AEnemyUnit::UpdateFacing(const FVector& WorldDirection, float DeltaTime)
 
 void AEnemyUnit::UpdateLocomotionAnim(bool bMoving)
 {
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
 	UAnimSequence* Desired = bMoving ? WalkAnim.Get() : IdleAnim.Get();
 	if (!Desired || Desired == CurrentAnim)
 	{
@@ -546,8 +562,14 @@ void AEnemyUnit::UpdateLocomotionAnim(bool bMoving)
 
 ADefenderUnit* AEnemyUnit::FindNearbyDefender(float Range) const
 {
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
 	TArray<AActor*> Found;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADefenderUnit::StaticClass(), Found);
+	UGameplayStatics::GetAllActorsOfClass(World, ADefenderUnit::StaticClass(), Found);
 
 	ADefenderUnit* Best = nullptr;
 	float BestDistSq = Range * Range;
@@ -556,7 +578,7 @@ ADefenderUnit* AEnemyUnit::FindNearbyDefender(float Range) const
 	for (AActor* Actor : Found)
 	{
 		ADefenderUnit* Defender = Cast<ADefenderUnit>(Actor);
-		if (!Defender || !Defender->IsAlive())
+		if (!IsValid(Defender) || Defender->IsActorBeingDestroyed() || !Defender->IsAlive())
 		{
 			continue;
 		}
@@ -577,6 +599,11 @@ ACentralTower* AEnemyUnit::FindTower() const
 
 void AEnemyUnit::RefreshDamageVisual()
 {
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
 	// damage feedback = slight squash, keep pack materials
 	const float Ratio = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
 	const float ScaleMul = FMath::Lerp(0.88f, 1.f, Ratio);

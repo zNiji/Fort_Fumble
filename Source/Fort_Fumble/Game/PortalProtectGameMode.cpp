@@ -33,6 +33,7 @@ void APortalProtectGameMode::BeginPlay()
 	bGameOver = false;
 	StatusMessage.Empty();
 	PlayerPlaceAttempts = 0;
+	SelectedDefenderType = EDefenderType::Cannon;
 	SpawnWorld();
 
 	// pawn might not exist yet at game mode BeginPlay - retry until possessed
@@ -144,7 +145,66 @@ void APortalProtectGameMode::PlacePlayerOnTerrain()
 	PC->SetControlRotation(FRotator(-10.f, Facing.Yaw, 0.f));
 }
 
-// check coins + budget, spawn cannon on pad top, deduct cost
+int32 APortalProtectGameMode::GetDefenderCostForType(EDefenderType Type) const
+{
+	switch (Type)
+	{
+	case EDefenderType::Marksman:
+		return MarksmanCost;
+	case EDefenderType::Mortar:
+		return MortarCost;
+	case EDefenderType::Cannon:
+	default:
+		return CannonCost;
+	}
+}
+
+FString APortalProtectGameMode::GetDefenderDisplayName(EDefenderType Type)
+{
+	switch (Type)
+	{
+	case EDefenderType::Marksman:
+		return TEXT("Marksman");
+	case EDefenderType::Mortar:
+		return TEXT("Mortar");
+	case EDefenderType::Cannon:
+	default:
+		return TEXT("Cannon");
+	}
+}
+
+void APortalProtectGameMode::SetSelectedDefenderType(EDefenderType Type)
+{
+	if (bGameOver)
+	{
+		return;
+	}
+	SelectedDefenderType = Type;
+	const int32 Cost = GetDefenderCostForType(SelectedDefenderType);
+	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Selected defender type -> %s (cost %d)"),
+		*GetDefenderDisplayName(SelectedDefenderType), Cost);
+	SetStatusMessage(
+		FString::Printf(TEXT("Selected: %s (%d coins)."), *GetDefenderDisplayName(SelectedDefenderType), Cost),
+		1.8f);
+}
+
+void APortalProtectGameMode::CycleSelectedDefenderType(int32 Delta)
+{
+	if (bGameOver || Delta == 0)
+	{
+		return;
+	}
+	const int32 Count = 3;
+	int32 Index = static_cast<int32>(SelectedDefenderType);
+	Index = (Index + Delta) % Count;
+	if (Index < 0)
+	{
+		Index += Count;
+	}
+	SetSelectedDefenderType(static_cast<EDefenderType>(Index));
+}
+
+// check coins + budget, spawn defender on pad top, deduct cost
 bool APortalProtectGameMode::TryPlaceDefenderAtSpot(ADefenderPlacementSpot* Spot)
 {
 	if (bGameOver || !Spot || Spot->IsOccupied())
@@ -158,28 +218,48 @@ bool APortalProtectGameMode::TryPlaceDefenderAtSpot(ADefenderPlacementSpot* Spot
 		return false;
 	}
 
-	if (CoinBalance < DefenderCost)
+	const EDefenderType PlaceType = SelectedDefenderType;
+	const int32 Cost = GetDefenderCostForType(PlaceType);
+	if (CoinBalance < Cost)
 	{
-		SetStatusMessage(FString::Printf(TEXT("Need %d coins (have %d)."), DefenderCost, CoinBalance));
+		SetStatusMessage(FString::Printf(TEXT("Need %d coins for %s (have %d)."),
+			Cost, *GetDefenderDisplayName(PlaceType), CoinBalance));
 		return false;
 	}
 
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	// spawn on pad surface then lift by pivot-to-ground so base sits on the disc
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
 	const FVector Surface = Spot->GetPadSurfaceLocation();
-	ADefenderUnit* Defender = GetWorld()->SpawnActor<ADefenderUnit>(
-		ADefenderUnit::StaticClass(), Surface, FRotator::ZeroRotator, Params);
+	const FTransform SpawnXform(FRotator::ZeroRotator, Surface);
+
+	// defer BeginPlay so InitializeAsType runs before default Cannon setup
+	ADefenderUnit* Defender = World->SpawnActorDeferred<ADefenderUnit>(
+		ADefenderUnit::StaticClass(),
+		SpawnXform,
+		nullptr,
+		nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	if (!Defender)
 	{
 		return false;
 	}
-	Defender->SetActorLocation(Surface + FVector(0.f, 0.f, Defender->GetPivotToGroundOffset()));
+
+	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] placing %s (cost %d, coins %d -> %d)"),
+		*GetDefenderDisplayName(PlaceType), Cost, CoinBalance, CoinBalance - Cost);
+
+	Defender->InitializeAsType(PlaceType);
+	const FVector FinalLoc = Surface + FVector(0.f, 0.f, Defender->GetPivotToGroundOffset());
+	Defender->FinishSpawning(FTransform(FRotator::ZeroRotator, FinalLoc));
 
 	Spot->SetOccupied(true);
 	--DefendersRemaining;
-	CoinBalance -= DefenderCost;
-	SetStatusMessage(FString::Printf(TEXT("Defender placed (−%d coins)."), DefenderCost), 1.5f);
+	CoinBalance -= Cost;
+	SetStatusMessage(FString::Printf(TEXT("%s placed (−%d coins)."),
+		*GetDefenderDisplayName(PlaceType), Cost), 1.5f);
 	return true;
 }
 

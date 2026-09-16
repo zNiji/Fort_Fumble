@@ -1,18 +1,20 @@
-// cannon unit - aiming, auto fire, damage feedback
+// defender units - cannon / marksman / mortar, aim + auto fire
 
 #include "Defender/DefenderUnit.h"
 #include "Enemy/EnemyUnit.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
 ADefenderUnit::ADefenderUnit()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	// scene root so mesh relative rotation survives SetActorRotation in UpdateAim
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
@@ -22,43 +24,15 @@ ADefenderUnit::ADefenderUnit()
 	Mesh->SetCollisionObjectType(ECC_WorldDynamic);
 	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
 	Mesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-	// projectiles need overlap not block on cannon mesh
 	Mesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	Mesh->SetGenerateOverlapEvents(true);
 
-	// Cannon.uasset in content is a material, real mesh is CannonSketchfab
+	// ctor-only soft refs so CDO has a cannon mesh before InitializeAsType runs
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CannonAsset(
 		TEXT("/Game/cartoon_cannon_low_poly__extracted/source/CannonSketchfab.CannonSketchfab"));
 	if (CannonAsset.Succeeded())
 	{
 		Mesh->SetStaticMesh(CannonAsset.Object);
-		// fit mesh to ~140uu footprint on the ~120uu pad
-		const FBoxSphereBounds Bounds = CannonAsset.Object->GetBounds();
-		const float MeshFootprint = FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y) * 2.f;
-		constexpr float TargetFootprint = 140.f;
-		BaseMeshScale = FMath::Clamp(TargetFootprint / FMath::Max(MeshFootprint, 1.f), 0.3f, 2.f);
-		Mesh->SetRelativeScale3D(FVector(BaseMeshScale));
-		// +90 rel yaw so barrel points along actor +X after playtest fiddling
-		Mesh->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
-		PivotToGroundOffset = (Bounds.BoxExtent.Z - Bounds.Origin.Z) * BaseMeshScale;
-		bUsingCannonMesh = true;
-		UE_LOG(LogTemp, Log,
-			TEXT("[PortalProtect] CannonSketchfab facing: Mesh RelYaw=+90 (child of Root), AimYawOffset=0."));
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error,
-			TEXT("[PortalProtect] Failed to load defender cannon StaticMesh at /Game/cartoon_cannon_low_poly__extracted/source/CannonSketchfab.CannonSketchfab — using cone fallback."));
-		static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeAsset(TEXT("/Engine/BasicShapes/Cone.Cone"));
-		if (ConeAsset.Succeeded())
-		{
-			Mesh->SetStaticMesh(ConeAsset.Object);
-			BaseMeshScale = 1.1f;
-			Mesh->SetRelativeScale3D(FVector(0.9f, 0.9f, 1.3f) * BaseMeshScale);
-			const FBoxSphereBounds Bounds = ConeAsset.Object->GetBounds();
-			PivotToGroundOffset = (Bounds.BoxExtent.Z - Bounds.Origin.Z) * BaseMeshScale * 1.3f;
-		}
-		bUsingCannonMesh = false;
 	}
 
 	Health = MaxHealth;
@@ -67,8 +41,285 @@ ADefenderUnit::ADefenderUnit()
 void ADefenderUnit::BeginPlay()
 {
 	Super::BeginPlay();
+	if (!bTypeConfigured)
+	{
+		InitializeAsType(DefenderType);
+	}
 	Health = MaxHealth;
 	RefreshColor();
+}
+
+void ADefenderUnit::InitializeAsType(EDefenderType InType)
+{
+	DefenderType = InType;
+	bTypeConfigured = true;
+	bUsingCannonMesh = false;
+	FallbackScaleMul = FVector(1.f);
+
+	switch (DefenderType)
+	{
+	case EDefenderType::Cannon:
+		MaxHealth = 90.f;
+		AttackRange = 750.f;
+		AttackDamage = 18.f;
+		AttackCooldown = 1.0f;
+		AimMaxPitch = 18.f;
+		AimInterpSpeed = 6.f;
+		SplashRadius = 0.f;
+		SplashDamage = 0.f;
+		break;
+	case EDefenderType::Marksman:
+		MaxHealth = 70.f;
+		AttackRange = 1300.f;
+		AttackDamage = 40.f;
+		AttackCooldown = 2.2f;
+		AimMaxPitch = 12.f;
+		AimInterpSpeed = 4.f;
+		SplashRadius = 0.f;
+		SplashDamage = 0.f;
+		break;
+	case EDefenderType::Mortar:
+		MaxHealth = 95.f;
+		AttackRange = 600.f;
+		AttackDamage = 12.f;
+		AttackCooldown = 1.8f;
+		AimMaxPitch = 55.f;
+		AimInterpSpeed = 5.f;
+		SplashRadius = 240.f;
+		SplashDamage = 8.f;
+		break;
+	default:
+		break;
+	}
+
+	Health = MaxHealth;
+	SetupMeshForType();
+
+	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Defender InitializeAsType -> %s (range=%.0f dmg=%.0f)"),
+		DefenderType == EDefenderType::Marksman ? TEXT("Marksman")
+			: (DefenderType == EDefenderType::Mortar ? TEXT("Mortar") : TEXT("Cannon")),
+		AttackRange, AttackDamage);
+}
+
+void ADefenderUnit::SetupMeshForType()
+{
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
+	// stylized FBX is often ~1m (tiny in UU) — allow large scale; old 2.5 clamp left them pin-sized
+	auto FitMeshToFootprint = [this](UStaticMesh* StaticMesh, float TargetFootprint, float RelYaw)
+	{
+		if (!IsValid(Mesh) || !IsValid(StaticMesh))
+		{
+			return;
+		}
+		Mesh->SetStaticMesh(StaticMesh);
+		const FBoxSphereBounds Bounds = StaticMesh->GetBounds();
+		const float MeshFootprint = FMath::Max(Bounds.BoxExtent.X, Bounds.BoxExtent.Y) * 2.f;
+		BaseMeshScale = FMath::Clamp(TargetFootprint / FMath::Max(MeshFootprint, 0.01f), 0.01f, 300.f);
+		Mesh->SetRelativeScale3D(FVector(BaseMeshScale) * FallbackScaleMul);
+		Mesh->SetRelativeRotation(FRotator(0.f, RelYaw, 0.f));
+		// seats mesh on pad after scale — used by spawn placement
+		PivotToGroundOffset = (Bounds.BoxExtent.Z - Bounds.Origin.Z) * BaseMeshScale * FallbackScaleMul.Z;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("[PortalProtect] Mesh bounds BoxExtent=(%.2f,%.2f,%.2f) OriginZ=%.2f footprint=%.2f scale=%.2f pivotOff=%.2f"),
+			Bounds.BoxExtent.X, Bounds.BoxExtent.Y, Bounds.BoxExtent.Z,
+			Bounds.Origin.Z, MeshFootprint, BaseMeshScale, PivotToGroundOffset);
+	};
+
+	static const TCHAR* StylizedA_Mat = TEXT(
+		"/Game/Stylized_Turrets_-_Tower_Defense-c74b72af/fbx/stylized_turrets_fbx_extracted/FBX/Stylized_Turrets_A_mat.Stylized_Turrets_A_mat");
+	static const TCHAR* StylizedA_Tex = TEXT(
+		"/Game/Stylized_Turrets_-_Tower_Defense-c74b72af/fbx/stylized_turrets_fbx_extracted/Textures/Stylized_Turrets_A.Stylized_Turrets_A");
+	static const TCHAR* StylizedB_Mat = TEXT(
+		"/Game/Stylized_Turrets_-_Tower_Defense-c74b72af/fbx/stylized_turrets_fbx_extracted/FBX/Stylized_Turrets_B_mat.Stylized_Turrets_B_mat");
+	static const TCHAR* StylizedB_Tex = TEXT(
+		"/Game/Stylized_Turrets_-_Tower_Defense-c74b72af/fbx/stylized_turrets_fbx_extracted/Textures/Stylized_Turrets_B.Stylized_Turrets_B");
+
+	// LoadObject — ConstructorHelpers only works inside constructors
+	switch (DefenderType)
+	{
+	case EDefenderType::Cannon:
+	{
+		UStaticMesh* CannonMesh = LoadObject<UStaticMesh>(nullptr,
+			TEXT("/Game/cartoon_cannon_low_poly__extracted/source/CannonSketchfab.CannonSketchfab"));
+		if (CannonMesh)
+		{
+			FitMeshToFootprint(CannonMesh, 140.f, 90.f);
+			bUsingCannonMesh = true;
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Cannon mesh loaded (CannonSketchfab)."));
+		}
+		else if (UStaticMesh* Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone")))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[PortalProtect] Cannon fallback — CannonSketchfab missing from Content."));
+			FallbackScaleMul = FVector(0.9f, 0.9f, 1.3f);
+			FitMeshToFootprint(Cone, 120.f, 0.f);
+			ApplyMeshTint(FLinearColor(0.55f, 0.55f, 0.58f));
+		}
+		break;
+	}
+	case EDefenderType::Marksman:
+	{
+		// tall footprint reads as long-range; swap A_b in editor if barrel faces wrong way
+		UStaticMesh* MarksmanMesh = LoadObject<UStaticMesh>(nullptr, TEXT(
+			"/Game/Stylized_Turrets_-_Tower_Defense-c74b72af/fbx/stylized_turrets_fbx_extracted/FBX/Stylized_Turrets_A_a.Stylized_Turrets_A_a"));
+		if (MarksmanMesh)
+		{
+			FallbackScaleMul = FVector(0.92f, 0.92f, 1.22f);
+			// was 92 — bump toward pad / Cannon (~140) visual weight
+			FitMeshToFootprint(MarksmanMesh, 220.f, -90.f);
+			ApplyStylizedTurretMaterials(StylizedA_Mat, StylizedA_Tex);
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Marksman mesh loaded (Stylized_Turrets_A_a)."));
+		}
+		else if (UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")))
+		{
+			FallbackScaleMul = FVector(0.55f, 0.55f, 2.2f);
+			FitMeshToFootprint(Cylinder, 90.f, 0.f);
+			ApplyMeshTint(FLinearColor(0.25f, 0.45f, 0.95f));
+			UE_LOG(LogTemp, Warning,
+				TEXT("[PortalProtect] Marksman fallback cylinder — check Stylized_Turrets_A_a import path."));
+		}
+		break;
+	}
+	case EDefenderType::Mortar:
+	{
+		// wider B-set mesh + slight squash — splash / lobbing look
+		UStaticMesh* MortarMesh = LoadObject<UStaticMesh>(nullptr, TEXT(
+			"/Game/Stylized_Turrets_-_Tower_Defense-c74b72af/fbx/stylized_turrets_fbx_extracted/FBX/Stylized_Turrets_B_b.Stylized_Turrets_B_b"));
+		if (MortarMesh)
+		{
+			FallbackScaleMul = FVector(1.12f, 1.12f, 0.92f);
+			// was 148 — chunkier than cannon for splash identity
+			FitMeshToFootprint(MortarMesh, 260.f, -90.f);
+			ApplyStylizedTurretMaterials(StylizedB_Mat, StylizedB_Tex);
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Mortar mesh loaded (Stylized_Turrets_B_b)."));
+		}
+		else if (UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
+		{
+			FallbackScaleMul = FVector(1.4f, 1.4f, 0.85f);
+			FitMeshToFootprint(Cube, 130.f, 0.f);
+			ApplyMeshTint(FLinearColor(0.85f, 0.42f, 0.12f));
+			UE_LOG(LogTemp, Warning,
+				TEXT("[PortalProtect] Mortar fallback cube — check Stylized_Turrets_B_b import path."));
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+void ADefenderUnit::ApplyStylizedTurretMaterials(const TCHAR* MatPath, const TCHAR* TexPath)
+{
+	if (!IsValid(Mesh) || !MatPath || !TexPath)
+	{
+		return;
+	}
+
+	auto ApplyToAllSlots = [this](UMaterialInterface* Mat)
+	{
+		if (!IsValid(Mesh) || !IsValid(Mat))
+		{
+			return;
+		}
+		const int32 NumSlots = FMath::Clamp(Mesh->GetNumMaterials(), 1, 32);
+		for (int32 Slot = 0; Slot < NumSlots; ++Slot)
+		{
+			Mesh->SetMaterial(Slot, Mat);
+		}
+	};
+
+	UMaterialInterface* PackMat = LoadObject<UMaterialInterface>(nullptr, MatPath);
+	UTexture2D* PackTex = LoadObject<UTexture2D>(nullptr, TexPath);
+
+	// prefer pack material; if blank Interchange MIC, MID + wire BaseColor like CoinPickup
+	UMaterialInterface* ParentMat = PackMat;
+	if (!IsValid(ParentMat))
+	{
+		ParentMat = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Game/RPGTinyFantasyForest/Material/MI_DefaultPBR.MI_DefaultPBR"));
+	}
+	if (!IsValid(ParentMat))
+	{
+		ParentMat = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Game/RPGTinyFantasyForest/Material/BaseMAT/M_DefaultPBR.M_DefaultPBR"));
+	}
+	if (!IsValid(ParentMat))
+	{
+		ParentMat = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	}
+
+	if (!IsValid(ParentMat))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PortalProtect] No parent mat for stylized turret (%s)."), MatPath);
+		return;
+	}
+
+	if (IsValid(PackTex))
+	{
+		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(ParentMat, this);
+		if (IsValid(MID))
+		{
+			static const FName TexParams[] = {
+				TEXT("DiffuseColorMap"),
+				TEXT("T_BaseColor"),
+				TEXT("BaseColor"),
+				TEXT("Base Color"),
+				TEXT("Diffuse"),
+				TEXT("Texture"),
+				TEXT("Diffuse Color"),
+			};
+			for (const FName& Param : TexParams)
+			{
+				MID->SetTextureParameterValue(Param, PackTex);
+			}
+			static const FName WeightParams[] = {
+				TEXT("DiffuseColorMapWeight"),
+				TEXT("AmbientColorMapWeight"),
+			};
+			for (const FName& Param : WeightParams)
+			{
+				MID->SetScalarParameterValue(Param, 1.f);
+			}
+			MID->SetVectorParameterValue(TEXT("DiffuseColor"), FLinearColor::White);
+			MID->SetVectorParameterValue(TEXT("AmbientColor"), FLinearColor(0.05f, 0.05f, 0.05f));
+			ApplyToAllSlots(MID);
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Stylized turret MID applied (tex=%s)."), TexPath);
+			return;
+		}
+	}
+
+	if (IsValid(PackMat))
+	{
+		ApplyToAllSlots(PackMat);
+		UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Stylized turret pack mat applied (%s)."), MatPath);
+	}
+}
+
+void ADefenderUnit::ApplyMeshTint(const FLinearColor& Tint)
+{
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+	UMaterialInterface* BaseMat = Mesh->GetMaterial(0);
+	if (!IsValid(BaseMat))
+	{
+		BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	}
+	if (IsValid(BaseMat))
+	{
+		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, this);
+		if (IsValid(MID))
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), Tint);
+			Mesh->SetMaterial(0, MID);
+		}
+	}
 }
 
 void ADefenderUnit::Tick(float DeltaTime)
@@ -79,7 +330,6 @@ void ADefenderUnit::Tick(float DeltaTime)
 		return;
 	}
 
-	// barrel tracks target every frame, separate from attack cooldown
 	UpdateAim(DeltaTime);
 
 	AttackTimer -= DeltaTime;
@@ -92,7 +342,7 @@ void ADefenderUnit::Tick(float DeltaTime)
 
 void ADefenderUnit::ApplyDamage(float Amount)
 {
-	if (!IsAlive())
+	if (!IsValid(this) || IsActorBeingDestroyed() || !IsAlive() || Amount <= 0.f)
 	{
 		return;
 	}
@@ -105,23 +355,21 @@ void ADefenderUnit::ApplyDamage(float Amount)
 	}
 }
 
-// smooth rotate toward nearest slime in range
 void ADefenderUnit::UpdateAim(float DeltaTime)
 {
-	AEnemyUnit* Target = FindNearestEnemy();
-	if (!Target)
+	AEnemyUnit* Target = FindAttackTarget();
+	if (!IsValid(Target) || !Target->IsAlive())
 	{
-		return; // keep last facing when nothing in range
+		return;
 	}
 
 	FVector ToTarget = Target->GetActorLocation() - GetActorLocation();
-	ToTarget.Z += 40.f; // aim at body not feet
+	ToTarget.Z += DefenderType == EDefenderType::Mortar ? 20.f : 40.f;
 	if (ToTarget.SizeSquared() < 1.f)
 	{
 		return;
 	}
 
-	// actor +X is forward, mesh rel yaw lines barrel up with that
 	FRotator Desired = ToTarget.Rotation();
 	Desired.Yaw += AimYawOffset;
 	Desired.Pitch = FMath::Clamp(Desired.Pitch, -AimMaxPitch, AimMaxPitch);
@@ -131,21 +379,115 @@ void ADefenderUnit::UpdateAim(float DeltaTime)
 	SetActorRotation(NewRot);
 }
 
-// damage nearest enemy in 2D attack range
 void ADefenderUnit::TryAttack()
 {
-	if (AEnemyUnit* Target = FindNearestEnemy())
+	AEnemyUnit* Target = FindAttackTarget();
+	if (!IsValid(Target) || !Target->IsAlive())
 	{
-		Target->ApplyDamage(AttackDamage);
-		DrawDebugLine(GetWorld(), GetActorLocation() + FVector(0, 0, 80), Target->GetActorLocation(),
-			FColor::Green, false, 0.12f, 0, 3.f);
+		return;
+	}
+
+	const FVector Muzzle = GetActorLocation() + FVector(0.f, 0.f, 80.f);
+	const FVector HitLoc = Target->GetActorLocation();
+	// keep weak ref — primary may be destroyed by the direct hit before splash runs
+	const TWeakObjectPtr<AEnemyUnit> PrimaryWeak(Target);
+
+	Target->ApplyDamage(AttackDamage);
+
+	if (DefenderType == EDefenderType::Mortar && SplashRadius > 0.f && SplashDamage > 0.f)
+	{
+		ApplySplashAt(HitLoc, PrimaryWeak.Get());
+		if (UWorld* World = GetWorld())
+		{
+			DrawDebugSphere(World, HitLoc, SplashRadius, 16, FColor::Orange, false, 0.25f, 0, 2.f);
+		}
+	}
+
+	FColor LineColor = FColor::Green;
+	if (DefenderType == EDefenderType::Marksman)
+	{
+		LineColor = FColor::Cyan;
+	}
+	else if (DefenderType == EDefenderType::Mortar)
+	{
+		LineColor = FColor::Orange;
+	}
+
+	const float LineThickness = DefenderType == EDefenderType::Marksman ? 5.f : 3.f;
+	const float LineDuration = DefenderType == EDefenderType::Marksman ? 0.08f : 0.12f;
+	if (UWorld* World = GetWorld())
+	{
+		DrawDebugLine(World, Muzzle, HitLoc, LineColor, false, LineDuration, 0, LineThickness);
 	}
 }
 
-AEnemyUnit* ADefenderUnit::FindNearestEnemy() const
+void ADefenderUnit::ApplySplashAt(const FVector& Center, AEnemyUnit* PrimaryTarget)
 {
+	UWorld* World = GetWorld();
+	if (!World || SplashRadius <= 0.f || SplashDamage <= 0.f)
+	{
+		return;
+	}
+
+	// gather first — ApplyDamage may Destroy mid-combat and must not mutate while we walk the live query
 	TArray<AActor*> Found;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AEnemyUnit::StaticClass(), Found);
+	UGameplayStatics::GetAllActorsOfClass(World, AEnemyUnit::StaticClass(), Found);
+
+	TArray<TWeakObjectPtr<AEnemyUnit>> SplashTargets;
+	SplashTargets.Reserve(Found.Num());
+	const float RadiusSq = SplashRadius * SplashRadius;
+
+	for (AActor* Actor : Found)
+	{
+		AEnemyUnit* Enemy = Cast<AEnemyUnit>(Actor);
+		if (!IsValid(Enemy) || Enemy->IsActorBeingDestroyed() || !Enemy->IsAlive())
+		{
+			continue;
+		}
+		if (PrimaryTarget && Enemy == PrimaryTarget)
+		{
+			continue;
+		}
+		if (FVector::DistSquared2D(Center, Enemy->GetActorLocation()) <= RadiusSq)
+		{
+			SplashTargets.Add(Enemy);
+		}
+	}
+
+	for (const TWeakObjectPtr<AEnemyUnit>& WeakEnemy : SplashTargets)
+	{
+		AEnemyUnit* Enemy = WeakEnemy.Get();
+		if (!IsValid(Enemy) || Enemy->IsActorBeingDestroyed() || !Enemy->IsAlive())
+		{
+			continue;
+		}
+		Enemy->ApplyDamage(SplashDamage);
+	}
+}
+
+AEnemyUnit* ADefenderUnit::FindAttackTarget() const
+{
+	switch (DefenderType)
+	{
+	case EDefenderType::Marksman:
+		return FindMarksmanTarget();
+	case EDefenderType::Cannon:
+	case EDefenderType::Mortar:
+	default:
+		return FindNearestEnemyInRange();
+	}
+}
+
+AEnemyUnit* ADefenderUnit::FindNearestEnemyInRange() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	TArray<AActor*> Found;
+	UGameplayStatics::GetAllActorsOfClass(World, AEnemyUnit::StaticClass(), Found);
 
 	AEnemyUnit* Best = nullptr;
 	float BestDistSq = AttackRange * AttackRange;
@@ -154,11 +496,10 @@ AEnemyUnit* ADefenderUnit::FindNearestEnemy() const
 	for (AActor* Actor : Found)
 	{
 		AEnemyUnit* Enemy = Cast<AEnemyUnit>(Actor);
-		if (!Enemy || !Enemy->IsAlive())
+		if (!IsValid(Enemy) || Enemy->IsActorBeingDestroyed() || !Enemy->IsAlive())
 		{
 			continue;
 		}
-		// 2D range so elevated pads still hit path enemies
 		const float DistSq = FVector::DistSquared2D(Origin, Enemy->GetActorLocation());
 		if (DistSq <= BestDistSq)
 		{
@@ -169,9 +510,54 @@ AEnemyUnit* ADefenderUnit::FindNearestEnemy() const
 	return Best;
 }
 
+// furthest in range; tie-break toward higher current HP
+AEnemyUnit* ADefenderUnit::FindMarksmanTarget() const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	TArray<AActor*> Found;
+	UGameplayStatics::GetAllActorsOfClass(World, AEnemyUnit::StaticClass(), Found);
+
+	AEnemyUnit* Best = nullptr;
+	float BestDistSq = 0.f;
+	float BestHealth = -1.f;
+	const FVector Origin = GetActorLocation();
+	const float MaxRangeSq = AttackRange * AttackRange;
+
+	for (AActor* Actor : Found)
+	{
+		AEnemyUnit* Enemy = Cast<AEnemyUnit>(Actor);
+		if (!IsValid(Enemy) || Enemy->IsActorBeingDestroyed() || !Enemy->IsAlive())
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared2D(Origin, Enemy->GetActorLocation());
+		if (DistSq > MaxRangeSq)
+		{
+			continue;
+		}
+		const float HP = Enemy->GetHealth();
+		if (!Best || DistSq > BestDistSq + 1.f || (FMath::IsNearlyEqual(DistSq, BestDistSq, 100.f) && HP > BestHealth))
+		{
+			Best = Enemy;
+			BestDistSq = DistSq;
+			BestHealth = HP;
+		}
+	}
+	return Best;
+}
+
 void ADefenderUnit::RefreshColor()
 {
-	// keep pack materials, show damage with slight scale dip
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
 	const float Ratio = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
 	const float ScaleMul = FMath::Lerp(0.92f, 1.f, Ratio);
 	if (bUsingCannonMesh)
@@ -180,6 +566,6 @@ void ADefenderUnit::RefreshColor()
 	}
 	else
 	{
-		Mesh->SetRelativeScale3D(FVector(0.9f, 0.9f, 1.3f) * (BaseMeshScale * ScaleMul));
+		Mesh->SetRelativeScale3D(FallbackScaleMul * (BaseMeshScale * ScaleMul));
 	}
 }

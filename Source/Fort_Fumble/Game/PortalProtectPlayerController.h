@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Core/PortalProtectTypes.h"
 #include "PortalProtectPlayerController.generated.h"
 
 class ADefenderPlacementSpot;
@@ -65,6 +66,13 @@ public:
 protected:
 	void OnLeftClick();
 	void OnRestart();
+	bool IsGameplayInputBlocked() const;
+	void ApplyDefenderTypeSelection(EDefenderType Type);
+	void SelectDefenderCannon();
+	void SelectDefenderMarksman();
+	void SelectDefenderMortar();
+	void CycleDefenderPrev();
+	void CycleDefenderNext();
 	ADefenderPlacementSpot* TracePlacementSpot() const;
 
 	void ShowPauseMenu();

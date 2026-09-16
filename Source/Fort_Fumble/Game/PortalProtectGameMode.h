@@ -9,6 +9,7 @@
 #include "CoreMinimal.h"
 
 #include "GameFramework/GameModeBase.h"
+#include "Core/PortalProtectTypes.h"
 
 #include "PortalProtectGameMode.generated.h"
 
@@ -96,7 +97,22 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "PortalProtect")
 
-	int32 GetDefenderCost() const { return DefenderCost; }
+	int32 GetDefenderCost() const { return GetDefenderCostForType(SelectedDefenderType); }
+
+	UFUNCTION(BlueprintPure, Category = "PortalProtect")
+	EDefenderType GetSelectedDefenderType() const { return SelectedDefenderType; }
+
+	UFUNCTION(BlueprintPure, Category = "PortalProtect")
+	int32 GetDefenderCostForType(EDefenderType Type) const;
+
+	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
+	void SetSelectedDefenderType(EDefenderType Type);
+
+	UFUNCTION(BlueprintCallable, Category = "PortalProtect")
+	void CycleSelectedDefenderType(int32 Delta);
+
+	UFUNCTION(BlueprintPure, Category = "PortalProtect")
+	static FString GetDefenderDisplayName(EDefenderType Type);
 
 
 
@@ -152,7 +168,13 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "PortalProtect|Economy")
 
-	int32 DefenderCost = 15;
+	int32 CannonCost = 15;
+
+	UPROPERTY(EditAnywhere, Category = "PortalProtect|Economy")
+	int32 MarksmanCost = 25;
+
+	UPROPERTY(EditAnywhere, Category = "PortalProtect|Economy")
+	int32 MortarCost = 30;
 
 
 
@@ -235,6 +257,8 @@ protected:
 	bool bGameOver = false;
 
 	FString StatusMessage;
+
+	EDefenderType SelectedDefenderType = EDefenderType::Cannon;
 
 };
 

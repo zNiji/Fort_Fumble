@@ -2,6 +2,7 @@
 
 #include "Game/PortalProtectHUD.h"
 #include "Game/PortalProtectGameMode.h"
+#include "Core/PortalProtectTypes.h"
 #include "Tower/CentralTower.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -77,15 +78,22 @@ void APortalProtectHUD::DrawHUD()
 	const FString Line2 = FString::Printf(TEXT("Wave: %d   |   Enemies left: %d"),
 		WaveNum > 0 ? WaveNum : 1, EnemiesLeft);
 	const FString Line3 = FString::Printf(TEXT("Tower HP: %.0f / %.0f"), TowerHP, TowerMax);
-	const FString Line4 = FString::Printf(TEXT("Coins: %d   |   Defender cost: %d   |   Places left: %d"),
-		GM->GetCoinBalance(), GM->GetDefenderCost(), GM->GetDefendersRemaining());
-	const FString Line5 = TEXT("WASD move  |  Mouse look  |  Space jump  |  LMB place  |  Esc/P pause  |  R restart");
+	const FString SelectedName = APortalProtectGameMode::GetDefenderDisplayName(GM->GetSelectedDefenderType());
+	const int32 SelectedCost = GM->GetDefenderCost();
+	const FString Line4 = FString::Printf(TEXT("Coins: %d   |   Places left: %d   |   Selected: %s (%d coins)"),
+		GM->GetCoinBalance(), GM->GetDefendersRemaining(), *SelectedName, SelectedCost);
+	const FString Line4b = FString::Printf(TEXT("Costs — Cannon: %d   Marksman: %d   Mortar: %d"),
+		GM->GetDefenderCostForType(EDefenderType::Cannon),
+		GM->GetDefenderCostForType(EDefenderType::Marksman),
+		GM->GetDefenderCostForType(EDefenderType::Mortar));
+	const FString Line5 = TEXT("1/2/3 or Q/E or wheel — pick defender  |  LMB place  |  WASD  |  Esc pause  |  R restart");
 
 	DrawText(Line1, FLinearColor::White, 40.f, 82.f, BodyFont, 1.2f);
 	DrawText(Line2, FLinearColor(1.f, 0.55f, 0.35f), 40.f, 112.f, BodyFont, 1.2f);
 	DrawText(Line3, FLinearColor(0.6f, 0.85f, 1.f), 40.f, 142.f, BodyFont, 1.2f);
 	DrawText(Line4, FLinearColor(1.f, 0.9f, 0.3f), 40.f, 172.f, BodyFont, 1.2f);
-	DrawText(Line5, FLinearColor(0.9f, 0.9f, 0.7f), 40.f, 202.f, BodyFont, 1.05f);
+	DrawText(Line4b, FLinearColor(0.75f, 0.85f, 1.f), 40.f, 202.f, BodyFont, 1.05f);
+	DrawText(Line5, FLinearColor(0.9f, 0.9f, 0.7f), 40.f, 232.f, BodyFont, 1.05f);
 
 	const float CX = Canvas->SizeX * 0.5f;
 	const float CY = Canvas->SizeY * 0.5f;
@@ -95,6 +103,6 @@ void APortalProtectHUD::DrawHUD()
 	const FString Status = GM->GetStatusMessage();
 	if (!Status.IsEmpty())
 	{
-		DrawText(Status, FLinearColor(1.f, 0.75f, 0.35f), 40.f, 236.f, BodyFont, 1.15f);
+		DrawText(Status, FLinearColor(1.f, 0.75f, 0.35f), 40.f, 266.f, BodyFont, 1.15f);
 	}
 }

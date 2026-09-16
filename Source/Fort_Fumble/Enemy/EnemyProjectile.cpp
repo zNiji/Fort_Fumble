@@ -50,12 +50,18 @@ void AEnemyProjectile::BeginPlay()
 {
 	Super::BeginPlay();
 
-	Collision->OnComponentBeginOverlap.AddDynamic(this, &AEnemyProjectile::OnOverlap);
+	if (IsValid(Collision))
+	{
+		Collision->OnComponentBeginOverlap.AddDynamic(this, &AEnemyProjectile::OnOverlap);
+	}
 
 	// green tint so shots read as enemy fire
-	if (UMaterialInstanceDynamic* Mid = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	if (IsValid(Mesh))
 	{
-		Mid->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.25f, 0.85f, 0.35f));
+		if (UMaterialInstanceDynamic* Mid = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			Mid->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.25f, 0.85f, 0.35f));
+		}
 	}
 }
 
@@ -84,7 +90,7 @@ void AEnemyProjectile::InitProjectile(AActor* InTarget, float InDamage, float In
 void AEnemyProjectile::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	if (bConsumed)
+	if (bConsumed || IsActorBeingDestroyed())
 	{
 		return;
 	}
@@ -100,21 +106,28 @@ void AEnemyProjectile::Tick(float DeltaTime)
 	const FVector AimOffset(0.f, 0.f, 40.f);
 	if (AActor* Target = TargetActor.Get())
 	{
-		const FVector AimPoint = Target->GetActorLocation() + AimOffset;
-		const FVector Desired = (AimPoint - GetActorLocation()).GetSafeNormal() * Speed;
-		Velocity = FMath::VInterpTo(Velocity, Desired, DeltaTime, HomingStrength);
-		if (Velocity.SizeSquared() > 1.f)
+		if (!IsValid(Target) || Target->IsActorBeingDestroyed())
 		{
-			SetActorRotation(Velocity.Rotation());
+			TargetActor.Reset();
 		}
-
-		// big hit radius for TD feel - covers cannon size and height delta
-		const float HitR = HitProximityRadius;
-		if (FVector::DistSquared(GetActorLocation(), AimPoint) <= HitR * HitR
-			|| FVector::DistSquared2D(GetActorLocation(), Target->GetActorLocation()) <= HitR * HitR)
+		else
 		{
-			ApplyHitTo(Target);
-			return;
+			const FVector AimPoint = Target->GetActorLocation() + AimOffset;
+			const FVector Desired = (AimPoint - GetActorLocation()).GetSafeNormal() * Speed;
+			Velocity = FMath::VInterpTo(Velocity, Desired, DeltaTime, HomingStrength);
+			if (Velocity.SizeSquared() > 1.f)
+			{
+				SetActorRotation(Velocity.Rotation());
+			}
+
+			// big hit radius for TD feel - covers cannon size and height delta
+			const float HitR = HitProximityRadius;
+			if (FVector::DistSquared(GetActorLocation(), AimPoint) <= HitR * HitR
+				|| FVector::DistSquared2D(GetActorLocation(), Target->GetActorLocation()) <= HitR * HitR)
+			{
+				ApplyHitTo(Target);
+				return;
+			}
 		}
 	}
 
@@ -131,7 +144,7 @@ void AEnemyProjectile::OnOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 // only hurt tower or cannons - ignore slimes, props, instigator
 void AEnemyProjectile::ApplyHitTo(AActor* Other)
 {
-	if (bConsumed || !Other || Other == this)
+	if (bConsumed || !IsValid(Other) || Other == this || Other->IsActorBeingDestroyed())
 	{
 		return;
 	}
@@ -147,7 +160,7 @@ void AEnemyProjectile::ApplyHitTo(AActor* Other)
 
 	if (ADefenderUnit* Defender = Cast<ADefenderUnit>(Other))
 	{
-		if (Defender->IsAlive())
+		if (IsValid(Defender) && !Defender->IsActorBeingDestroyed() && Defender->IsAlive())
 		{
 			Defender->ApplyDamage(Damage);
 		}
@@ -157,7 +170,7 @@ void AEnemyProjectile::ApplyHitTo(AActor* Other)
 
 	if (ACentralTower* Tower = Cast<ACentralTower>(Other))
 	{
-		if (Tower->IsAlive())
+		if (IsValid(Tower) && !Tower->IsActorBeingDestroyed() && Tower->IsAlive())
 		{
 			Tower->ApplyDamage(Damage);
 		}

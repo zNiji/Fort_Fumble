@@ -84,7 +84,7 @@ void ACentralTower::Tick(float DeltaTime)
 // take damage, shrink visual a bit, broadcast destroy at zero
 void ACentralTower::ApplyDamage(float Amount)
 {
-	if (!IsAlive())
+	if (!IsValid(this) || IsActorBeingDestroyed() || !IsAlive() || Amount <= 0.f)
 	{
 		return;
 	}
@@ -101,18 +101,31 @@ void ACentralTower::ApplyDamage(float Amount)
 // instant damage to nearest slime in range (debug line shows the shot)
 void ACentralTower::TryAttack()
 {
-	if (AEnemyUnit* Target = FindNearestEnemy())
+	AEnemyUnit* Target = FindNearestEnemy();
+	if (!IsValid(Target) || !Target->IsAlive())
 	{
-		Target->ApplyDamage(AttackDamage);
-		DrawDebugLine(GetWorld(), GetActorLocation() + FVector(0, 0, 160), Target->GetActorLocation(),
+		return;
+	}
+
+	const FVector HitLoc = Target->GetActorLocation();
+	Target->ApplyDamage(AttackDamage);
+	if (UWorld* World = GetWorld())
+	{
+		DrawDebugLine(World, GetActorLocation() + FVector(0, 0, 160), HitLoc,
 			FColor::Cyan, false, 0.15f, 0, 4.f);
 	}
 }
 
 AEnemyUnit* ACentralTower::FindNearestEnemy() const
 {
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
 	TArray<AActor*> Found;
-	UGameplayStatics::GetAllActorsOfClass(GetWorld(), AEnemyUnit::StaticClass(), Found);
+	UGameplayStatics::GetAllActorsOfClass(World, AEnemyUnit::StaticClass(), Found);
 
 	AEnemyUnit* Best = nullptr;
 	float BestDistSq = AttackRange * AttackRange;
@@ -121,7 +134,7 @@ AEnemyUnit* ACentralTower::FindNearestEnemy() const
 	for (AActor* Actor : Found)
 	{
 		AEnemyUnit* Enemy = Cast<AEnemyUnit>(Actor);
-		if (!Enemy || !Enemy->IsAlive())
+		if (!IsValid(Enemy) || Enemy->IsActorBeingDestroyed() || !Enemy->IsAlive())
 		{
 			continue;
 		}
@@ -137,12 +150,17 @@ AEnemyUnit* ACentralTower::FindNearestEnemy() const
 
 void ACentralTower::ApplyVisualColor()
 {
+	if (!IsValid(BaseMesh))
+	{
+		return;
+	}
+
 	// pack portal mat has no color param - pulse scale instead for damage feedback
 	const float Ratio = MaxHealth > 0.f ? Health / MaxHealth : 0.f;
 	const float Scale = FMath::Lerp(BaseVisualScale * 0.85f, BaseVisualScale, Ratio);
 	BaseMesh->SetRelativeScale3D(FVector(Scale));
 
-	if (PortalMaterial)
+	if (IsValid(PortalMaterial))
 	{
 		BaseMesh->SetMaterial(0, PortalMaterial);
 	}

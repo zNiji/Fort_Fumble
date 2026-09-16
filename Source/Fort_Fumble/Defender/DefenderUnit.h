@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Core/PortalProtectTypes.h"
 #include "DefenderUnit.generated.h"
 
 class USceneComponent;
@@ -22,7 +23,13 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Defender")
+	void InitializeAsType(EDefenderType InType);
+
+	UFUNCTION(BlueprintCallable, Category = "Defender")
 	void ApplyDamage(float Amount);
+
+	UFUNCTION(BlueprintPure, Category = "Defender")
+	EDefenderType GetDefenderType() const { return DefenderType; }
 
 	UFUNCTION(BlueprintPure, Category = "Defender")
 	bool IsAlive() const { return Health > 0.f; }
@@ -47,6 +54,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Defender|Combat")
 	float AttackCooldown = 0.65f;
 
+	// mortar only — splash on primary impact
+	UPROPERTY(EditAnywhere, Category = "Defender|Combat")
+	float SplashRadius = 240.f;
+
+	UPROPERTY(EditAnywhere, Category = "Defender|Combat")
+	float SplashDamage = 8.f;
+
+	UPROPERTY(EditAnywhere, Category = "Defender")
+	EDefenderType DefenderType = EDefenderType::Cannon;
+
 	// extra yaw if the imported mesh still points the wrong way
 	UPROPERTY(EditAnywhere, Category = "Defender|Aim")
 	float AimYawOffset = 0.f;
@@ -68,7 +85,14 @@ public:
 private:
 	void UpdateAim(float DeltaTime);
 	void TryAttack();
-	AEnemyUnit* FindNearestEnemy() const;
+	AEnemyUnit* FindAttackTarget() const;
+	AEnemyUnit* FindNearestEnemyInRange() const;
+	AEnemyUnit* FindMarksmanTarget() const;
+	void ApplySplashAt(const FVector& Center, AEnemyUnit* PrimaryTarget);
+	void SetupMeshForType();
+	// pack mats often blank after Interchange — force mat + BaseColor tex onto all slots
+	void ApplyStylizedTurretMaterials(const TCHAR* MatPath, const TCHAR* TexPath);
+	void ApplyMeshTint(const FLinearColor& Tint);
 	void RefreshColor();
 
 	float Health = 90.f;
@@ -76,4 +100,6 @@ private:
 	float BaseMeshScale = 1.f;
 	float PivotToGroundOffset = 40.f;
 	bool bUsingCannonMesh = false;
+	bool bTypeConfigured = false;
+	FVector FallbackScaleMul = FVector(1.f);
 };

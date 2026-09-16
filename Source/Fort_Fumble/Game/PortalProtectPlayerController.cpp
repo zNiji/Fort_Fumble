@@ -2,6 +2,7 @@
 
 #include "Game/PortalProtectPlayerController.h"
 #include "Game/PortalProtectGameMode.h"
+#include "Core/PortalProtectTypes.h"
 #include "Defender/DefenderPlacementSpot.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/Button.h"
@@ -71,6 +72,87 @@ void APortalProtectPlayerController::SetupInputComponent()
 		FInputKeyBinding& PauseBinding = InputComponent->BindKey(
 			EKeys::P, IE_Pressed, this, &APortalProtectPlayerController::TogglePauseMenu);
 		PauseBinding.bExecuteWhenPaused = true;
+
+		InputComponent->BindKey(EKeys::One, IE_Pressed, this, &APortalProtectPlayerController::SelectDefenderCannon);
+		InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &APortalProtectPlayerController::SelectDefenderMarksman);
+		InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &APortalProtectPlayerController::SelectDefenderMortar);
+		InputComponent->BindKey(EKeys::NumPadOne, IE_Pressed, this, &APortalProtectPlayerController::SelectDefenderCannon);
+		InputComponent->BindKey(EKeys::NumPadTwo, IE_Pressed, this, &APortalProtectPlayerController::SelectDefenderMarksman);
+		InputComponent->BindKey(EKeys::NumPadThree, IE_Pressed, this, &APortalProtectPlayerController::SelectDefenderMortar);
+		InputComponent->BindKey(EKeys::Q, IE_Pressed, this, &APortalProtectPlayerController::CycleDefenderPrev);
+		InputComponent->BindKey(EKeys::E, IE_Pressed, this, &APortalProtectPlayerController::CycleDefenderNext);
+		InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &APortalProtectPlayerController::CycleDefenderNext);
+		InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &APortalProtectPlayerController::CycleDefenderPrev);
+		UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Defender type keys bound (1/2/3, numpad, Q/E, wheel)."));
+	}
+}
+
+bool APortalProtectPlayerController::IsGameplayInputBlocked() const
+{
+	return bPauseMenuOpen || bGameOverMenuOpen || UGameplayStatics::IsGamePaused(this);
+}
+
+void APortalProtectPlayerController::ApplyDefenderTypeSelection(EDefenderType Type)
+{
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+	if (APortalProtectGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APortalProtectGameMode>() : nullptr)
+	{
+		if (!GM->IsGameOver())
+		{
+			GM->SetSelectedDefenderType(Type);
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PortalProtect] Select defender failed - AuthGameMode is not PortalProtectGameMode."));
+	}
+}
+
+void APortalProtectPlayerController::SelectDefenderCannon()
+{
+	ApplyDefenderTypeSelection(EDefenderType::Cannon);
+}
+
+void APortalProtectPlayerController::SelectDefenderMarksman()
+{
+	ApplyDefenderTypeSelection(EDefenderType::Marksman);
+}
+
+void APortalProtectPlayerController::SelectDefenderMortar()
+{
+	ApplyDefenderTypeSelection(EDefenderType::Mortar);
+}
+
+void APortalProtectPlayerController::CycleDefenderPrev()
+{
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+	if (APortalProtectGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APortalProtectGameMode>() : nullptr)
+	{
+		if (!GM->IsGameOver())
+		{
+			GM->CycleSelectedDefenderType(-1);
+		}
+	}
+}
+
+void APortalProtectPlayerController::CycleDefenderNext()
+{
+	if (IsGameplayInputBlocked())
+	{
+		return;
+	}
+	if (APortalProtectGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APortalProtectGameMode>() : nullptr)
+	{
+		if (!GM->IsGameOver())
+		{
+			GM->CycleSelectedDefenderType(1);
+		}
 	}
 }
 
@@ -78,7 +160,7 @@ void APortalProtectPlayerController::PlayerTick(float DeltaTime)
 {
 	Super::PlayerTick(DeltaTime);
 
-	if (bPauseMenuOpen || bGameOverMenuOpen || IsPaused())
+	if (IsGameplayInputBlocked())
 	{
 		return;
 	}
@@ -114,7 +196,7 @@ ADefenderPlacementSpot* APortalProtectPlayerController::TracePlacementSpot() con
 
 void APortalProtectPlayerController::OnLeftClick()
 {
-	if (bPauseMenuOpen || bGameOverMenuOpen || IsPaused())
+	if (IsGameplayInputBlocked())
 	{
 		return;
 	}
