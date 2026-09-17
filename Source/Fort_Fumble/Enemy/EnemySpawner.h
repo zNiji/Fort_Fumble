@@ -75,6 +75,8 @@ private:
 	void SpawnNextFromQueue();
 	void CleanupDeadRefs();
 	EEnemyType PickTypeForWave(int32 WaveNumber, FRandomStream& Rng) const;
+	// tweak next wave from clear time + tower HP (skill adapt)
+	void UpdateAdaptiveDifficulty();
 
 	UPROPERTY()
 	TObjectPtr<AProceduralTerrainActor> Terrain;
@@ -91,4 +93,11 @@ private:
 	float ClearWaitTimer = 0.f;
 	bool bSpawningEnabled = true;
 	bool bVictoryNotified = false;
+
+	// world time when BeginWave fired - used for clear-time skill check
+	float WaveStartTimeSeconds = 0.f;
+	// applied to the NEXT BuildWaveComposition / rest after a clear
+	int32 AdaptiveCountDelta = 0;
+	int32 AdaptiveTankChanceBonus = 0;
+	float AdaptiveRestMultiplier = 1.f;
 };

@@ -66,8 +66,18 @@ void ACoinSpawner::SpawnOneCoin()
 		return;
 	}
 
-	FVector Loc;
-	if (!Terrain->TryGetRandomOffPathLocation(Loc, 40.f))
+	// a few tries in case a pick still lands on dressing / fails
+	FVector Loc = FVector::ZeroVector;
+	bool bFound = false;
+	for (int32 Attempt = 0; Attempt < 8; ++Attempt)
+	{
+		if (Terrain->TryGetRandomOffPathLocation(Loc, 40.f))
+		{
+			bFound = true;
+			break;
+		}
+	}
+	if (!bFound)
 	{
 		return;
 	}

@@ -98,6 +98,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Terrain|Dressing", meta = (ClampMin = "200"))
 	float DressingTowerClearanceRadius = 1100.f;
 
+	// keep coins (and other off-path picks) clear of trees/rocks
+	UPROPERTY(EditAnywhere, Category = "Terrain|Dressing", meta = (ClampMin = "50"))
+	float CoinDressingClearance = 180.f;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UProceduralMeshComponent> TerrainMesh;
 
@@ -125,6 +129,8 @@ private:
 	void ClearMapBorder();
 	void SpawnMapBorder();
 	bool IsNearDefenderSlot(const FVector& WorldLoc) const;
+	// too close to a tree/rock component
+	bool IsNearDressing(const FVector& WorldLoc) const;
 	// path cell or within Radius cells of one (chebyshev)
 	bool IsOnOrNearPath(int32 X, int32 Y, int32 Radius) const;
 	// how far along a path this cell is - 0 spawn, 1 tower, false if nothing close

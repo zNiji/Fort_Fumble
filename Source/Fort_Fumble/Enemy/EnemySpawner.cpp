@@ -4,6 +4,7 @@
 #include "Enemy/EnemyUnit.h"
 #include "Game/PortalProtectGameMode.h"
 #include "Terrain/ProceduralTerrainActor.h"
+#include "Tower/CentralTower.h"
 #include "Engine/World.h"
 
 AEnemySpawner::AEnemySpawner()
@@ -102,6 +103,9 @@ void AEnemySpawner::Tick(float DeltaTime)
 		{
 			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Wave %d cleared"), CurrentWave);
 
+			// bake skill feedback into next wave BEFORE we decide rest length
+			UpdateAdaptiveDifficulty();
+
 			// last wave done = victory, no more rests / waves
 			if (CurrentWave >= MaxWaves)
 			{
@@ -120,8 +124,9 @@ void AEnemySpawner::Tick(float DeltaTime)
 			WavePhase = EWavePhase::Resting;
 			// later waves get a tiny bit less rest so pressure creeps up
 			const float Scale = FMath::Clamp(1.f - (CurrentWave - 1) * 0.04f, 0.7f, 1.f);
-			PhaseTimer = RestDuration * Scale;
-			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Resting %.1fs before next wave"), PhaseTimer);
+			PhaseTimer = RestDuration * Scale * AdaptiveRestMultiplier;
+			UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Resting %.1fs before next wave (adapt x%.2f)"),
+				PhaseTimer, AdaptiveRestMultiplier);
 		}
 		break;
 	}
@@ -139,6 +144,7 @@ void AEnemySpawner::BeginWave(int32 WaveNumber)
 	WavePhase = EWavePhase::Spawning;
 	PhaseTimer = 0.25f;
 	ClearWaitTimer = 0.f;
+	WaveStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 
 	// tell HUD to flash "Wave N" in the middle of the screen
 	if (APortalProtectGameMode* GM = GetWorld()->GetAuthGameMode<APortalProtectGameMode>())
@@ -146,8 +152,8 @@ void AEnemySpawner::BeginWave(int32 WaveNumber)
 		GM->ShowWaveBanner(CurrentWave);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Starting wave %d with %d enemies"),
-		CurrentWave, EnemiesLeftToSpawn);
+	UE_LOG(LogTemp, Log, TEXT("[PortalProtect] Starting wave %d with %d enemies (adapt %+d)"),
+		CurrentWave, EnemiesLeftToSpawn, AdaptiveCountDelta);
 }
 
 void AEnemySpawner::BuildWaveComposition(int32 WaveNumber)
@@ -167,6 +173,12 @@ void AEnemySpawner::BuildWaveComposition(int32 WaveNumber)
 		Count = FMath::Clamp(3 + WaveNumber * 2 + Rng.RandRange(0, 1), 3, 28);
 	}
 
+	// skill adapt from previous clear - keep early tutorial waves mostly stable
+	if (WaveNumber > 1)
+	{
+		Count = FMath::Clamp(Count + AdaptiveCountDelta, 2, 28);
+	}
+
 	for (int32 i = 0; i < Count; ++i)
 	{
 		SpawnQueue.Add(PickTypeForWave(WaveNumber, Rng));
@@ -178,6 +190,55 @@ void AEnemySpawner::BuildWaveComposition(int32 WaveNumber)
 		const int32 j = Rng.RandRange(0, i);
 		SpawnQueue.Swap(i, j);
 	}
+}
+
+void AEnemySpawner::UpdateAdaptiveDifficulty()
+{
+	// defaults = neutral; overwritten below from this clear
+	AdaptiveCountDelta = 0;
+	AdaptiveTankChanceBonus = 0;
+	AdaptiveRestMultiplier = 1.f;
+
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	const float ClearTime = FMath::Max(0.f, Now - WaveStartTimeSeconds);
+	// rough expected clear: spawn drip + fight time that grows with wave index
+	const float ExpectedClear = 16.f + CurrentWave * 5.f;
+
+	float TowerHPPct = 1.f;
+	if (APortalProtectGameMode* GM = GetWorld()->GetAuthGameMode<APortalProtectGameMode>())
+	{
+		if (ACentralTower* Tower = GM->GetTower())
+		{
+			TowerHPPct = (Tower->GetMaxHealth() > 0.f)
+				? (Tower->GetHealth() / Tower->GetMaxHealth())
+				: 1.f;
+		}
+	}
+
+	const bool bFastClear = ClearTime < ExpectedClear * 0.65f;
+	const bool bSlowClear = ClearTime > ExpectedClear * 1.35f;
+	const bool bHealthyTower = TowerHPPct >= 0.7f;
+	const bool bLowTower = TowerHPPct <= 0.4f;
+
+	if (bFastClear && bHealthyTower)
+	{
+		// crushing it → slightly denser / tankier next wave
+		AdaptiveCountDelta = (ClearTime < ExpectedClear * 0.45f) ? 2 : 1;
+		AdaptiveTankChanceBonus = 8;
+		AdaptiveRestMultiplier = 0.9f;
+	}
+	else if (bSlowClear || bLowTower)
+	{
+		// struggling → one fewer enemy and a longer breather
+		AdaptiveCountDelta = -1;
+		AdaptiveTankChanceBonus = -6;
+		AdaptiveRestMultiplier = 1.3f;
+	}
+
+	UE_LOG(LogTemp, Log,
+		TEXT("[PortalProtect] Adapt after wave %d: clear=%.1fs (expect ~%.1fs) tower=%.0f%% -> count%+d tank%+d restx%.2f"),
+		CurrentWave, ClearTime, ExpectedClear, TowerHPPct * 100.f,
+		AdaptiveCountDelta, AdaptiveTankChanceBonus, AdaptiveRestMultiplier);
 }
 
 EEnemyType AEnemySpawner::PickTypeForWave(int32 WaveNumber, FRandomStream& Rng) const
@@ -198,14 +259,15 @@ EEnemyType AEnemySpawner::PickTypeForWave(int32 WaveNumber, FRandomStream& Rng) 
 
 	if (WaveNumber == 3)
 	{
-		// first tanks show up, still mostly slime/runner
+		// first tanks show up, still mostly slime/runner (+/- adapt bias)
+		const int32 TankFloor = FMath::Clamp(80 - AdaptiveTankChanceBonus, 60, 90);
 		if (Roll < 45) return EEnemyType::Slime;
-		if (Roll < 80) return EEnemyType::Runner;
+		if (Roll < TankFloor) return EEnemyType::Runner;
 		return EEnemyType::Tank;
 	}
 
-	// later waves: more mixed, slowly more tanks
-	const int32 TankChance = FMath::Clamp(12 + (WaveNumber - 3) * 4, 12, 35);
+	// later waves: more mixed, slowly more tanks (+ skill bias)
+	const int32 TankChance = FMath::Clamp(12 + (WaveNumber - 3) * 4 + AdaptiveTankChanceBonus, 6, 40);
 	const int32 RunnerChance = FMath::Clamp(30 + (WaveNumber - 2) * 3, 30, 45);
 	if (Roll < TankChance) return EEnemyType::Tank;
 	if (Roll < TankChance + RunnerChance) return EEnemyType::Runner;

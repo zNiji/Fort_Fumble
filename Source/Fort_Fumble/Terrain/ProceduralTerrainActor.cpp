@@ -273,9 +273,24 @@ bool AProceduralTerrainActor::TryGetRandomOffPathLocation(FVector& OutLocation, 
 		return false;
 	}
 
-	const FIntPoint& Pick = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
-	OutLocation = GetCellWorldLocation(Pick.X, Pick.Y, ZOffset);
-	return true;
+	// shuffle then walk - skip cells sitting inside trees/rocks
+	for (int32 I = Candidates.Num() - 1; I > 0; --I)
+	{
+		Candidates.Swap(I, FMath::RandRange(0, I));
+	}
+
+	for (const FIntPoint& Pick : Candidates)
+	{
+		const FVector Loc = GetCellWorldLocation(Pick.X, Pick.Y, ZOffset);
+		if (IsNearDressing(Loc))
+		{
+			continue;
+		}
+		OutLocation = Loc;
+		return true;
+	}
+
+	return false;
 }
 
 bool AProceduralTerrainActor::IsNearDefenderSlot(const FVector& WorldLoc) const
@@ -284,6 +299,24 @@ bool AProceduralTerrainActor::IsNearDefenderSlot(const FVector& WorldLoc) const
 	for (const FDefenderSlotData& Slot : DefenderSlots)
 	{
 		if (FVector::DistSquared2D(WorldLoc, Slot.Location) < MinDistSq)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool AProceduralTerrainActor::IsNearDressing(const FVector& WorldLoc) const
+{
+	const float Clearance = FMath::Max(50.f, CoinDressingClearance);
+	const float MinDistSq = Clearance * Clearance;
+	for (const UStaticMeshComponent* Comp : DressingComponents)
+	{
+		if (!Comp)
+		{
+			continue;
+		}
+		if (FVector::DistSquared2D(WorldLoc, Comp->GetComponentLocation()) < MinDistSq)
 		{
 			return true;
 		}
