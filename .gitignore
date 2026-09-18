@@ -6,6 +6,7 @@ Saved/
 
 # Unreal generated project files
 *.sln
+*.slnx
 *.suo
 *.opensdf
 *.sdf
