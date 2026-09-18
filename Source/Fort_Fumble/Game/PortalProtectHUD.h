@@ -1,4 +1,4 @@
-// simple canvas HUD for match stats - no UMG needed for the basics
+// simple canvas HUD for match stats - corner panels, no UMG needed for the basics
 
 #pragma once
 
